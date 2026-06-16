@@ -1,0 +1,61 @@
+# Macro Intelligence Configuration
+# Per PRD v34.0 FR-GI001: Global macro data source and threshold settings
+
+# Data refresh frequencies (seconds)
+refresh:
+  macro_calendar: 3600       # 1 hour — economic calendar
+  geopolitical: 900          # 15 min — geopolitical keyword scan
+  global_market: 300         # 5 min — yfinance commodities/forex
+  black_swan_scan: 900       # 15 min — anomaly detection
+
+# Macro surprise thresholds (actual - forecast deviation)
+surprise_thresholds:
+  high: 0.5    # Major surprise — flag as urgent
+  medium: 0.2  # Notable surprise — flag as monitor
+  low: 0.1     # Minor surprise — background
+
+# Black swan detection thresholds
+black_swan:
+  vix_extreme: 30
+  index_drop_extreme: -3.0    # Percent
+  usd_change_elevated: 1.5   # Percent absolute
+  oil_change_extreme: 5.0    # Percent absolute
+  gold_change_extreme: 3.0   # Percent absolute
+  northbound_outflow_extreme: -100  # 亿 CNY
+  limit_down_ratio_extreme: 3.0     # down/up ratio
+  multi_indicator_threshold: 3      # N elevated → extreme
+
+# Geopolitical keyword categories
+geopolitical_keywords:
+  conflict:
+    - "战争"
+    - "冲突"
+    - "军事"
+    - "袭击"
+    - "入侵"
+    - "空袭"
+    - "导弹"
+  sanctions:
+    - "制裁"
+    - "禁运"
+    - "关税"
+    - "贸易战"
+    - "出口管制"
+  regions:
+    - "中东"
+    - "伊朗"
+    - "以色列"
+    - "俄罗斯"
+    - "乌克兰"
+    - "朝鲜"
+    - "台海"
+    - "南海"
+
+# Macro factor display names
+factor_labels:
+  interest_rate: "利率"
+  usd_index: "美元"
+  oil_price: "原油"
+  gold_price: "黄金"
+  trade_tension: "贸易摩擦"
+  liquidity: "流动性"

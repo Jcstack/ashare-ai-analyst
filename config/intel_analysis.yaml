@@ -1,0 +1,9 @@
+intel_analysis:
+  enabled: true
+  min_items_per_symbol: 1
+  max_reports_per_cycle: 5
+  cooldown_hours: 4
+  retention_days: 30
+  llm:
+    max_tokens: 2048
+    temperature: 0.3

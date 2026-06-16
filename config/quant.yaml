@@ -1,0 +1,108 @@
+# v15.0 Quant Core Configuration
+# Walk-forward, regime detection, feature store, signal library parameters
+
+walk_forward:
+  # Rolling window parameters
+  train_window_days: 120
+  test_window_days: 30
+  step_days: 30  # advance step between windows
+  min_trades_per_window: 5
+  # Overfit detection
+  degradation_threshold: 0.5  # 1 - (test_sharpe / train_sharpe) > this → overfit warning
+  max_degradation_ratio: 0.7  # hard reject above this
+
+regime_detection:
+  # HMM parameters
+  n_regimes: 3  # bull, bear, sideways
+  volatility_window_days: 20
+  lookback_days: 252  # 1 trading year
+  min_observations: 60
+  # Regime labels (mapped by volatility level)
+  regime_labels:
+    0: "low_volatility"   # sideways / consolidation
+    1: "medium_volatility"  # trending
+    2: "high_volatility"  # volatile / crisis
+
+feature_store:
+  # Cache configuration
+  default_ttl_seconds: 3600  # 1 hour
+  max_features_per_symbol: 50
+  # Feature versioning
+  version_prefix: "v1"
+  # Supported feature categories
+  categories:
+    - momentum
+    - mean_reversion
+    - volatility
+    - volume
+    - technical
+
+signal_library:
+  # Signal evaluation
+  default_lookback_days: 60
+  # Predefined signals
+  signals:
+    ma_cross:
+      description: "Moving average crossover"
+      fast_period: 5
+      slow_period: 20
+      signal_type: "momentum"
+      persistence_lookback: 10
+      persistence_max_boost: 0.5
+    rsi_extreme:
+      description: "RSI overbought/oversold"
+      period: 14
+      overbought: 70
+      oversold: 30
+      signal_type: "mean_reversion"
+      mid_range_lookback: 5
+      mid_range_max_strength: 0.6
+    bollinger_squeeze:
+      description: "Bollinger Band squeeze breakout"
+      period: 20
+      std_dev: 2.0
+      squeeze_threshold: 0.05
+      signal_type: "volatility"
+    volume_breakout:
+      description: "Volume surge above average"
+      period: 20
+      multiplier: 2.0
+      signal_type: "volume"
+      distribution_vol_threshold: 1.3
+      distribution_price_decline: -0.005
+    macd_divergence:
+      description: "MACD histogram divergence"
+      fast: 12
+      slow: 26
+      signal: 9
+      signal_type: "momentum"
+    sentiment_shift:
+      description: "Sentiment shift via momentum divergence"
+      short_window: 5
+      long_window: 20
+      threshold: 0.02
+      signal_type: "S6_CORRELATION_SHIFT"
+    policy_shock:
+      description: "Unusual policy-driven price moves"
+      lookback: 20
+      move_multiplier: 2.0
+      volume_low_percentile: 0.4
+      signal_type: "S7_POLICY_DRIVEN"
+    correlation_break:
+      description: "Stock-sector correlation breakdown"
+      correlation_window: 20
+      benchmark_window: 60
+      deviation_threshold: -0.3
+      signal_type: "S6_CORRELATION_SHIFT"
+    regime_change:
+      description: "Volatility regime change detection"
+      volatility_window: 20
+      lookback: 60
+      expansion_threshold: 1.5
+      contraction_threshold: 0.5
+      bb_period: 20
+      bb_std_dev: 2.0
+      signal_type: "S9_REGIME_CHANGE"
+  aggregation:
+    consensus_threshold: 0.15
+    neutral_weight_factor: 0.5

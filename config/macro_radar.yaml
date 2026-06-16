@@ -1,0 +1,127 @@
+# Macro Radar configuration
+# Commodity -> A-share sector/stock mappings, macro keywords, trigger rules
+
+# Commodity -> A-share sector mapping
+commodity_sector_map:
+  gold:
+    yf_symbol: "GC=F"
+    display: "国际金价"
+    sectors: ["黄金", "贵金属"]
+    representative_stocks: ["600489", "002155", "600547"]
+    threshold_pct: 2.0
+  crude_oil:
+    yf_symbol: "CL=F"
+    display: "WTI原油"
+    sectors: ["石油石化", "化工", "航空运输"]
+    representative_stocks: ["600028", "601857", "600585"]
+    inverse_sectors: ["航空运输"]
+    threshold_pct: 3.0
+  copper:
+    yf_symbol: "HG=F"
+    display: "LME铜"
+    sectors: ["有色金属", "铜"]
+    representative_stocks: ["603993", "601899"]
+    threshold_pct: 2.5
+  iron_ore:
+    yf_symbol: "TIO=F"
+    display: "铁矿石"
+    sectors: ["钢铁"]
+    representative_stocks: ["600019", "000898"]
+    threshold_pct: 3.0
+  natural_gas:
+    yf_symbol: "NG=F"
+    display: "天然气"
+    sectors: ["燃气", "化肥"]
+    threshold_pct: 4.0
+
+# Index -> market sentiment mapping
+index_sentiment_map:
+  sp500:
+    yf_symbol: "^GSPC"
+    display: "标普500"
+    impact: "A股整体情绪"
+    threshold_pct: 2.0
+  nasdaq:
+    yf_symbol: "^IXIC"
+    display: "纳指"
+    impact_sectors: ["半导体", "消费电子", "互联网", "AI"]
+    threshold_pct: 2.5
+  hang_seng:
+    yf_symbol: "^HSI"
+    display: "恒生指数"
+    impact: "港股通标的情绪"
+    threshold_pct: 2.0
+  vix:
+    yf_symbol: "^VIX"
+    display: "恐慌指数"
+    extreme_threshold: 25.0
+  usd_cny:
+    yf_symbol: "CNY=X"
+    display: "美元/人民币"
+    impact: "北向资金流向、出口企业"
+    threshold_pct: 0.5
+
+# Macro intel keyword classification (not dependent on stock code matching)
+macro_keywords:
+  geopolitical:
+    - "战争"
+    - "制裁"
+    - "关税"
+    - "贸易战"
+    - "军事"
+    - "冲突"
+    - "war"
+    - "sanction"
+    - "tariff"
+    - "missile"
+    - "Iran"
+    - "伊朗"
+    - "朝鲜"
+    - "台海"
+  monetary_policy:
+    - "降息"
+    - "加息"
+    - "量化宽松"
+    - "缩表"
+    - "MLF"
+    - "LPR"
+    - "逆回购"
+    - "Fed"
+    - "PBOC"
+    - "rate cut"
+    - "rate hike"
+    - "QE"
+    - "taper"
+  fiscal_policy:
+    - "刺激"
+    - "基建"
+    - "减税"
+    - "国债"
+    - "特别国债"
+    - "财政"
+    - "stimulus"
+    - "infrastructure"
+  commodity_shock:
+    - "油价"
+    - "金价"
+    - "铜价"
+    - "粮食"
+    - "能源危机"
+    - "OPEC"
+    - "oil"
+    - "gold"
+    - "crude"
+  systemic_risk:
+    - "银行挤兑"
+    - "债务违约"
+    - "流动性危机"
+    - "black swan"
+    - "黑天鹅"
+    - "灰犀牛"
+    - "暴雷"
+
+# Trigger rules
+trigger_rules:
+  min_keyword_matches: 1
+  min_source_weight: 0.60
+  cooldown_minutes: 60

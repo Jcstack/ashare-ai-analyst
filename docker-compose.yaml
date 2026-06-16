@@ -1,0 +1,158 @@
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "${PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - frontend-dist:/usr/share/nginx/html:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  api:
+    build: .
+    expose:
+      - "8000"
+    env_file:
+      - .env
+    environment:
+      - HTTP_PROXY=http://host.docker.internal:6152
+      - HTTPS_PROXY=http://host.docker.internal:6152
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.eastmoney.com
+      - CLAUDE_CODE_BRIDGE_URL=http://host.docker.internal:19821
+      - QLIB_SERVICE_URL=http://qlib-service:8001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 114.114.114.114
+      - 8.8.8.8
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./workspace:/app/workspace
+    depends_on:
+      redis:
+        condition: service_started
+      qlib-service:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    command: >
+      gunicorn src.web.app:app
+      -k uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:8000
+      --workers 2
+      --max-requests 10000
+      --max-requests-jitter 5000
+      --graceful-timeout 60
+      --timeout 600
+      --keep-alive 30
+
+  frontend:
+    build: ./frontend
+    volumes:
+      - frontend-dist:/app/dist
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server /usr/local/etc/redis/redis.conf
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    restart: unless-stopped
+
+  qlib-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.qlib
+    expose:
+      - "8001"
+    volumes:
+      - ./config:/app/config
+      - ${HOME}/.qlib:/root/.qlib    # Qlib binary data shared with host
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  celery-worker:
+    build: .
+    command: celery -A openclaw.celery_app worker --loglevel=info
+    env_file:
+      - .env
+    environment:
+      - HTTP_PROXY=http://host.docker.internal:6152
+      - HTTPS_PROXY=http://host.docker.internal:6152
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.eastmoney.com
+      - QLIB_SERVICE_URL=http://qlib-service:8001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 114.114.114.114
+      - 8.8.8.8
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./workspace:/app/workspace
+    depends_on:
+      redis:
+        condition: service_started
+      qlib-service:
+        condition: service_started
+    restart: unless-stopped
+
+  celery-beat:
+    build: .
+    command: celery -A openclaw.celery_app beat --loglevel=info
+    env_file:
+      - .env
+    dns:
+      - 114.114.114.114
+      - 8.8.8.8
+    volumes:
+      - ./config:/app/config
+    depends_on:
+      - redis
+      - celery-worker
+    restart: unless-stopped
+
+  discord-bot:
+    build: .
+    command: python -m src.discord_bot
+    env_file:
+      - .env
+    environment:
+      - HTTP_PROXY=http://host.docker.internal:6152
+      - HTTPS_PROXY=http://host.docker.internal:6152
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.eastmoney.com
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 114.114.114.114
+      - 8.8.8.8
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  frontend-dist:

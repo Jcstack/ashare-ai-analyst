@@ -1,0 +1,8 @@
+signal_rules:
+  L1_system:
+    - name: noise_filter
+      description: Block signals with extremely low confidence
+      min_confidence: 10
+    - name: empty_assets_filter
+      description: Block non-system signals without target assets
+      exempt_types: [SYSTEM_ALERT, S8_MACRO_DRIVEN, S9_REGIME_CHANGE]

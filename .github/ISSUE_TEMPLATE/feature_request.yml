@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a scoped improvement for the project
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea.
+
+        Please keep requests concrete and explain the user value, scope, and tradeoffs.
+  - type: checkboxes
+    id: search
+    attributes:
+      label: Pre-check
+      options:
+        - label: I searched existing issues and did not find a duplicate
+          required: true
+        - label: This request is about the project itself, not private setup or support
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What pain point or gap does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+    validations:
+      required: false

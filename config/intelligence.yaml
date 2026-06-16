@@ -1,0 +1,47 @@
+# v18.0 Intelligence Loop Configuration
+
+# Model monitoring
+monitoring:
+  # Accuracy backfill windows (days after prediction)
+  backfill_windows: [3, 5, 10]
+  # Rolling window for drift detection (days)
+  drift_window: 30
+  # Baseline accuracy (below this triggers warning)
+  baseline_accuracy: 0.50
+  # Drift threshold: decline from baseline by this % triggers alert
+  drift_threshold: 0.15
+  # Minimum predictions for drift calculation
+  min_predictions: 20
+
+# Reflection agent
+reflection:
+  # Maximum assumptions to check per analysis
+  max_assumptions_to_check: 5
+  # Confidence adjustment range (can reduce confidence by up to this amount)
+  max_confidence_reduction: 0.20
+  # Enable reflection step in master agent pipeline
+  enabled: true
+
+# Ensemble validation
+ensemble:
+  # Minimum consensus percentage to maintain trust zone
+  consensus_threshold: 0.60
+  # Trust zone downgrade when consensus is below threshold
+  low_consensus_trust_zone: "LOW"
+  # Providers to use for ensemble
+  providers: ["anthropic", "google"]
+  # Enable ensemble for trade decisions
+  enabled_for_trades: true
+
+# Memory store
+memory:
+  # Maximum stored memories
+  max_entries: 1000
+  # Embedding dimension (for simple TF-IDF vector store)
+  vector_dim: 256
+  # Maximum results per retrieval query
+  max_retrieval_results: 5
+  # Memory TTL in days (0 = no expiry)
+  ttl_days: 90
+  # Database path for memory persistence
+  db_path: "data/memory.db"

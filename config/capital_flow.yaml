@@ -1,0 +1,35 @@
+# Capital Flow Analysis Configuration
+# Per PRD v26.0
+
+capital_flow:
+  enabled: true
+
+  # Macro capital environment score weights (sum = 1.0)
+  macro_weights:
+    northbound: 0.35      # 北向资金 — 外资风向标
+    margin: 0.25           # 融资余额 — 杠杆资金
+    southbound: 0.20       # 南向资金 — A股资金外流信号
+    etf: 0.20              # ETF 净申购 — 机构行为
+
+  # Sector capital flow (Phase 2)
+  sector:
+    fetch_interval_minutes: 10
+    ranking_top_n: 20
+    anomaly_std_threshold: 2.0
+
+  # Per-stock divergence detection (Phase 3)
+  divergence:
+    min_consecutive_days: 2
+    price_change_threshold: 0.01
+
+  # Notification thresholds (Phase 4)
+  notification:
+    northbound_threshold: 80    # 北向资金单日超 N 亿触发通知
+    sector_anomaly: true
+    divergence_alert: true
+
+  # Cache settings
+  cache:
+    macro_ttl_hours: 6
+    sector_ttl_minutes: 10
+    format: parquet

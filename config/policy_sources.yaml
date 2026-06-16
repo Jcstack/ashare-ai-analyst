@@ -1,0 +1,88 @@
+# Policy & regulatory news source configuration
+# Part of WS4: Policy & Regulatory News
+
+sources:
+  csrc:
+    name: "证监会"
+    full_name: "中国证券监督管理委员会"
+    url: "http://www.csrc.gov.cn/csrc/c100746/common_list.shtml"
+    category: "regulatory"
+    impact_category: "regulatory"
+    refresh_interval_minutes: 15
+    selectors:
+      list: "li.first, li.li-height"
+      title: "a"
+      date: "span"
+    enabled: true
+
+  pboc:
+    name: "央行"
+    full_name: "中国人民银行"
+    url: "http://www.pbc.gov.cn/goutongjiaoliu/113456/113469/index.html"
+    category: "monetary"
+    impact_category: "monetary"
+    refresh_interval_minutes: 15
+    selectors:
+      list: "td:has(font.newslist_style)"
+      title: "a"
+      date: "span.hui12"
+    enabled: true
+
+  sse:
+    name: "上交所"
+    full_name: "上海证券交易所"
+    url: "http://www.sse.com.cn/disclosure/announcement/general/"
+    category: "exchange"
+    impact_category: "exchange"
+    refresh_interval_minutes: 30
+    selectors:
+      list: ".sse_list_1 dl"
+      title: "a"
+      date: "span"
+    enabled: true
+
+  mof:
+    name: "财政部"
+    full_name: "中华人民共和国财政部"
+    url: "http://www.mof.gov.cn/zhengwuxinxi/caizhengxinwen/"
+    category: "fiscal"
+    impact_category: "fiscal"
+    refresh_interval_minutes: 30
+    selectors:
+      list: "ul.xwfb_listbox li"
+      title: "a"
+      date: "span"
+    enabled: true
+
+# High-impact keywords that flag a policy item for priority attention
+high_impact_keywords:
+  monetary:
+    - "降准"
+    - "降息"
+    - "LPR"
+    - "MLF"
+    - "逆回购"
+    - "公开市场操作"
+    - "货币政策"
+    - "利率"
+  regulatory:
+    - "退市"
+    - "IPO"
+    - "注册制"
+    - "减持"
+    - "融资融券"
+    - "印花税"
+    - "转融通"
+    - "T+0"
+  fiscal:
+    - "减税"
+    - "专项债"
+    - "财政赤字"
+    - "国债"
+    - "消费券"
+  exchange:
+    - "停牌"
+    - "复牌"
+    - "熔断"
+    - "交易规则"
+    - "涨跌幅"

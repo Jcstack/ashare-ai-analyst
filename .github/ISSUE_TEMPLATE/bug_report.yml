@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible bug in the project
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+
+        Please provide a reproducible report with enough detail for maintainers to verify it quickly.
+  - type: checkboxes
+    id: search
+    attributes:
+      label: Pre-check
+      options:
+        - label: I searched existing issues and did not find a duplicate
+          required: true
+        - label: I removed secrets, tokens, and private data from this report
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the bug and the incorrect behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        OS:
+        Python:
+        Node.js:
+        Browser:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Redact any credentials or private data before submitting.
+    validations:
+      required: false

@@ -1,0 +1,155 @@
+# Industry profiles for Deep Association Holiday Research (FR-DA007).
+# Maps sector tags (from cross_market_map.yaml) to industry-specific research dimensions.
+# Used by AssociationProfileBuilder to enrich holiday research context.
+
+profiles:
+  entertainment:
+    display: "影视传媒"
+    key_metrics: ["票房", "排片占比", "上座率", "猫眼评分", "豆瓣评分"]
+    seasonal_events:
+      spring_festival:
+        name: "春节档"
+        months: [1, 2]
+        importance: "critical"
+      summer:
+        name: "暑期档"
+        months: [7, 8]
+        importance: "high"
+      national_day:
+        name: "国庆档"
+        months: [10]
+        importance: "high"
+    value_chain: ["内容制作", "宣发", "院线", "流媒体", "衍生品"]
+    research_hints:
+      box_office: "猫眼专业版 / 灯塔专业版查看实时票房"
+      reviews: "豆瓣评分、猫眼评分、淘票票想看数"
+      schedule: "猫眼专业版查看排片占比及上座率"
+    concept_keywords: ["影视院线", "春节档", "文生视频", "传媒"]
+
+  shipping:
+    display: "航运物流"
+    key_metrics: ["BDI指数", "SCFI运价", "集装箱吞吐量", "船舶利用率"]
+    seasonal_events:
+      peak_season:
+        name: "旺季运价"
+        months: [7, 8, 9, 10]
+        importance: "high"
+    value_chain: ["船东", "货代", "港口", "仓储", "物流科技"]
+    research_hints:
+      bdi: "上海航运交易所查看 SCFI/BDI 指数"
+      port: "交通运输部港口统计月报"
+    concept_keywords: ["航运", "一带一路", "港口"]
+
+  liquor:
+    display: "白酒"
+    key_metrics: ["批价", "终端库存", "动销率", "渠道价差"]
+    seasonal_events:
+      spring_festival:
+        name: "春节旺季"
+        months: [1, 2]
+        importance: "critical"
+      mid_autumn:
+        name: "中秋国庆旺季"
+        months: [9, 10]
+        importance: "high"
+    value_chain: ["酿造", "品牌运营", "经销商", "终端零售", "电商"]
+    research_hints:
+      price: "今日酒价 / 酒说公众号查看批价"
+      channel: "调研经销商动销和库存"
+    concept_keywords: ["白酒", "消费升级", "国企改革"]
+
+  new_energy:
+    display: "新能源"
+    key_metrics: ["装机量", "电池出货量", "硅料价格", "碳酸锂价格"]
+    seasonal_events:
+      year_end:
+        name: "年末抢装"
+        months: [11, 12]
+        importance: "high"
+    value_chain: ["硅料/锂矿", "电池/组件", "逆变器", "电站/储能", "回收"]
+    research_hints:
+      lithium: "上海有色网查看碳酸锂/氢氧化锂报价"
+      install: "国家能源局月度装机数据"
+    concept_keywords: ["锂电池", "光伏", "储能", "新能源车"]
+
+  semiconductor:
+    display: "半导体"
+    key_metrics: ["晶圆产能利用率", "ASP", "库存天数", "设计win数"]
+    seasonal_events:
+      consumer_peak:
+        name: "消费电子旺季"
+        months: [8, 9, 10]
+        importance: "high"
+    value_chain: ["EDA/IP", "设计", "制造", "封测", "设备", "材料"]
+    research_hints:
+      utilization: "SEMI/TrendForce 产能利用率月报"
+      price: "DRAM Exchange 存储芯片报价"
+    concept_keywords: ["芯片", "半导体", "国产替代", "AI算力"]
+
+  medical:
+    display: "医药健康"
+    key_metrics: ["管线进度", "集采中标价", "处方量", "医保谈判结果"]
+    seasonal_events:
+      medical_insurance:
+        name: "医保目录谈判"
+        months: [10, 11, 12]
+        importance: "critical"
+      vbp:
+        name: "集采开标"
+        months: [1, 7]
+        importance: "high"
+    value_chain: ["原料药", "制剂", "器械", "CXO", "流通", "零售药店"]
+    research_hints:
+      pipeline: "CDE 受理/审评公示查看管线"
+      vbp: "国家医保局集采公告"
+    concept_keywords: ["创新药", "CXO", "医疗器械", "中药"]
+
+  banking:
+    display: "银行"
+    key_metrics: ["净息差", "不良率", "拨备覆盖率", "信贷增速"]
+    seasonal_events:
+      credit_rush:
+        name: "开门红"
+        months: [1, 2, 3]
+        importance: "high"
+    value_chain: ["央行", "商业银行", "金融科技", "资产管理"]
+    research_hints:
+      macro: "央行社融/信贷数据月报"
+      rate: "PBOC MLF/LPR 利率公告"
+    concept_keywords: ["银行", "金融科技", "国企改革"]
+
+  real_estate:
+    display: "房地产"
+    key_metrics: ["销售面积", "土拍溢价率", "融资成本", "库存去化周期"]
+    seasonal_events:
+      golden_week:
+        name: "金九银十"
+        months: [9, 10]
+        importance: "high"
+      spring:
+        name: "小阳春"
+        months: [3, 4]
+        importance: "medium"
+    value_chain: ["土地获取", "开发建设", "销售代理", "物业管理", "建材"]
+    research_hints:
+      sales: "克而瑞/中指院月度销售排行"
+      policy: "住建部/央行地产政策动态"
+    concept_keywords: ["房地产", "城中村改造", "保障房"]
+
+  auto:
+    display: "汽车"
+    key_metrics: ["月销量", "交付量", "订单量", "渗透率"]
+    seasonal_events:
+      year_end:
+        name: "年末促销"
+        months: [11, 12]
+        importance: "high"
+      spring_festival:
+        name: "春节前购车潮"
+        months: [1, 2]
+        importance: "medium"
+    value_chain: ["零部件", "整车制造", "经销商", "后市场", "智能驾驶"]
+    research_hints:
+      sales: "乘联会/中汽协月度销量"
+      delivery: "各车企官方交付公告"
+    concept_keywords: ["新能源车", "智能驾驶", "汽车零部件"]

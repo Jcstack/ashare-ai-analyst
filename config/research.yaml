@@ -1,0 +1,124 @@
+# Research Workstation Configuration (研究工作站配置)
+# Three-model collaborative research: Sentinel + Actuary + Decision Brain
+
+sentinel:
+  # Gemini-powered news/sentiment scanning
+  caller: "sentinel_capture"
+  model: "gemini-2.5-flash"
+  timeout_seconds: 30
+  max_symbols_per_batch: 20
+  output_path: "workspace/sentinel/gemini_sense.json"
+  # Anomaly categories to scan
+  anomaly_categories:
+    - "大笔买入"
+    - "大笔卖出"
+    - "封涨停板"
+    - "封跌停板"
+    - "火箭发射"
+    - "高台跳水"
+  # News sources
+  news_lookback_hours: 24
+  hot_rank_limit: 30
+  # Fallback: when Gemini is unavailable, write raw data without LLM synthesis
+  fallback_on_llm_failure: true
+
+actuary:
+  # Qlib quantitative prediction
+  enabled: true
+  # Remote service URL (Docker: http://qlib-service:8001, local: http://localhost:8001)
+  # Set QLIB_SERVICE_URL env var to override
+  service_url: ""
+  qlib_provider_uri: "~/.qlib/qlib_data/cn_data"
+  default_model: "LGBModel"
+  default_horizon: 5  # Trading days
+  prediction_cache_ttl: 3600  # seconds
+  # Alpha factor validation
+  ic_threshold: 0.03  # Minimum IC value to consider signal valid
+  ic_lookback_days: 60
+  # Feature groups
+  features:
+    - "Alpha158"  # Standard 158 alpha factors
+  # Graceful degradation: all methods return None when Qlib is not installed
+  fallback_message: "Qlib not installed — using technical indicators only"
+
+decision_brain:
+  # Claude Code deep research skill
+  report_output_dir: "workspace/reports/deep"
+  report_min_words: 1000
+  # Report sections (Chinese)
+  sections:
+    - "市场环境概述"
+    - "哨兵信号研判"
+    - "量化预测评估"
+    - "技术面分析"
+    - "A股特殊约束"
+    - "综合研判与建议"
+  # Data lookback for analysis
+  price_lookback_days: 3
+  sentiment_lookback_days: 3
+
+bayesian_fusion:
+  # Weight configuration for multi-source fusion
+  weights:
+    sentinel: 0.25   # Gemini sentiment score
+    actuary: 0.35    # Qlib prediction score
+    technical: 0.40  # Bayesian indicator P(up)
+  # Re-normalization: when a source is unavailable, remaining weights sum to 1.0
+  renormalize_on_missing: true
+  # Confidence thresholds
+  thresholds:
+    strong_buy: 0.75
+    buy: 0.60
+    neutral_high: 0.55
+    neutral_low: 0.45
+    sell: 0.40
+    strong_sell: 0.25
+  # Signal labels
+  labels:
+    strong_buy: "强烈看多"
+    buy: "看多"
+    neutral: "中性"
+    sell: "看空"
+    strong_sell: "强烈看空"
+
+ashare_constraints:
+  # Limit-up/down thresholds
+  main_board_limit: 0.10
+  chinext_star_limit: 0.20
+  # T+1 settlement
+  t_plus_1: true
+  # Emotion damping factor for retail-dominated market
+  sentiment_damping: 0.8
+  # Trading hours (CST)
+  trading_start: "09:30"
+  trading_end: "15:00"
+  # Stamp duty and commission
+  stamp_duty_rate: 0.001  # 0.1% sell-only
+  commission_rate: 0.0003  # 0.03% both ways
+  commission_min: 5.0  # ¥5 minimum
+  lot_size: 100
+
+workspace:
+  root: "workspace/"
+  subdirs:
+    signals: "signals"
+    reports_deep: "reports/deep"
+    reports_weekly: "reports/weekly"
+    sentinel: "sentinel"
+    cache: "cache"
+    logs: "logs"
+
+orchestration:
+  # research.sh script settings
+  log_dir: "workspace/logs"
+  report_dir: "workspace/signals"
+  # Step control
+  steps:
+    sentinel: true
+    qlib_inference: true
+    aggregation: true  # Must succeed
+  # Default symbols (can be overridden via CLI)
+  default_symbols:
+    - "600519"  # 贵州茅台
+    - "000001"  # 平安银行
+    - "000858"  # 五粮液

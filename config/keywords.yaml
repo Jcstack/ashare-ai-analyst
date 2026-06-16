@@ -1,0 +1,53 @@
+# Keyword matching config for TrendNewsAggregator (FR-TN002).
+# Prefix rules:
+#   +keyword → required (ALL must match)
+#   !keyword → exclude (match → reject)
+#   plain    → normal (score = matched_count / total_normal)
+
+global_filters:
+  - "!广告"
+  - "!直播带货"
+  - "!招聘"
+  - "!培训课程"
+
+stock_keywords:
+  "001330":
+    required: ["+博纳"]
+    normal: ["影业", "电影", "票房", "春节档", "影视"]
+    display: "博纳影业"
+  "600519":
+    required: ["+茅台"]
+    normal: ["白酒", "酱香", "贵州", "高端白酒"]
+    display: "贵州茅台"
+  "000858":
+    required: ["+五粮液"]
+    normal: ["白酒", "浓香", "宜宾"]
+    display: "五粮液"
+  "601919":
+    required: ["+中远海控"]
+    normal: ["航运", "集运", "运力", "集装箱"]
+    display: "中远海控"
+  "300750":
+    required: ["+宁德时代"]
+    normal: ["锂电", "电池", "储能", "新能源"]
+    display: "宁德时代"
+  "002594":
+    required: ["+比亚迪"]
+    normal: ["新能源车", "电动车", "汽车"]
+    display: "比亚迪"
+
+sector_keywords:
+  entertainment: ["影视", "票房", "春节档", "暑期档", "院线"]
+  new_energy: ["光伏", "锂电", "储能", "新能源", "风电"]
+  semiconductor: ["芯片", "半导体", "光刻", "晶圆"]
+  liquor: ["白酒", "酱香", "浓香", "清香"]
+  ai_tech: ["人工智能", "AI", "大模型", "算力", "GPU"]
+  medical: ["医药", "创新药", "生物医药", "CXO"]
+  real_estate: ["房地产", "地产", "楼市", "土拍"]
+  banking: ["银行", "信贷", "存款", "利率"]
+
+macro_keywords:
+  policy: ["央行", "MLF", "LPR", "降准", "降息", "货币政策", "人民银行", "公开市场", "逆回购", "再贷款"]
+  trade: ["关税", "贸易战", "制裁", "出口管制", "进出口", "贸易摩擦"]
+  fiscal: ["财政", "国债", "专项债", "减税", "财政部", "地方债", "预算"]
+  regulation: ["证监会", "监管", "退市", "IPO", "注册制", "上交所", "深交所", "交易所", "处罚"]

@@ -1,0 +1,400 @@
+# OpenClaw 自动化调度配置
+# Per PRD FR-O001/FR-O002: Automated pipeline scheduling via Celery + Redis
+
+celery:
+  broker_url: "redis://redis:6379/0"
+  result_backend: "redis://redis:6379/1"
+  timezone: "Asia/Shanghai"
+
+beat_schedule:
+  daily_fetch:
+    task: "openclaw.tasks.daily_pipeline.task_fetch_all"
+    schedule:
+      crontab:
+        hour: 16
+        minute: 0
+        day_of_week: "1-5"  # Mon-Fri
+    description: "每日收盘后数据采集 (16:00 CST)"
+
+  # Qlib 二进制数据更新 (task_fetch_all 完成后 15 分钟)
+  qlib_data_update:
+    task: "openclaw.tasks.qlib_update_pipeline.task_qlib_data_update"
+    schedule:
+      crontab:
+        hour: 16
+        minute: 15
+        day_of_week: "1-5"
+    description: "Qlib数据更新 (16:15 CST, 日终数据采集后)"
+
+  daily_analysis:
+    task: "openclaw.tasks.daily_pipeline.task_analyze_all"
+    schedule:
+      crontab:
+        hour: 16
+        minute: 30
+        day_of_week: "1-5"
+    description: "每日技术分析 (16:30 CST)"
+
+  daily_prediction:
+    task: "openclaw.tasks.daily_pipeline.task_predict_all"
+    schedule:
+      crontab:
+        hour: 17
+        minute: 0
+        day_of_week: "1-5"
+    description: "每日AI预测 (17:00 CST)"
+
+  weekly_report:
+    task: "openclaw.tasks.daily_pipeline.task_weekly_report"
+    schedule:
+      crontab:
+        hour: 18
+        minute: 0
+        day_of_week: "5"  # Friday only
+    description: "每周汇总报告 (周五 18:00 CST)"
+
+  # v2.4 FR-NP001: Intraday sentiment scan (every 30min during trading hours)
+  sentiment_scan:
+    task: "openclaw.tasks.sentiment_pipeline.task_sentiment_scan"
+    schedule:
+      crontab:
+        minute: "*/30"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "盘中舆情扫描 (交易时段每30分钟)"
+
+  # v2.4 FR-NP002: Market overview (midday + close)
+  market_overview_midday:
+    task: "openclaw.tasks.sentiment_pipeline.task_market_overview"
+    schedule:
+      crontab:
+        hour: 11
+        minute: 30
+        day_of_week: "1-5"
+    description: "午盘市场概览 (11:30 CST)"
+
+  market_overview_close:
+    task: "openclaw.tasks.sentiment_pipeline.task_market_overview"
+    schedule:
+      crontab:
+        hour: 15
+        minute: 30
+        day_of_week: "1-5"
+    description: "收盘市场概览 (15:30 CST)"
+
+  # v12.0 Phase 4: Prediction accuracy backfill (daily after close)
+  backfill_predictions:
+    task: "openclaw.tasks.backfill_pipeline.task_backfill_predictions"
+    schedule:
+      crontab:
+        hour: 16
+        minute: 30
+        day_of_week: "1-5"
+    description: "预测准确率回填 (16:30 CST)"
+
+  # v12.0 Phase 4: Drift detection (weekly Sunday)
+  detect_drift:
+    task: "openclaw.tasks.backfill_pipeline.task_detect_drift"
+    schedule:
+      crontab:
+        hour: 10
+        minute: 0
+        day_of_week: "0"  # Sunday
+    description: "模型漂移检测 (周日 10:00 CST)"
+
+  # Market status reminders
+  market_opening_reminder:
+    task: "openclaw.tasks.market_status_pipeline.task_market_opening_reminder"
+    schedule:
+      crontab:
+        hour: 9
+        minute: 10
+        day_of_week: "1-5"
+    description: "开盘提醒 (09:10 CST, 交易日)"
+
+  market_closing_reminder:
+    task: "openclaw.tasks.market_status_pipeline.task_market_closing_reminder"
+    schedule:
+      crontab:
+        hour: 14
+        minute: 50
+        day_of_week: "1-5"
+    description: "收盘提醒 (14:50 CST, 交易日)"
+
+  holiday_summary:
+    task: "openclaw.tasks.market_status_pipeline.task_holiday_summary"
+    schedule:
+      crontab:
+        hour: 18
+        minute: 0
+        day_of_week: "1-5"
+    description: "休市预告 (18:00 CST, 最后交易日)"
+
+  calendar_refresh:
+    task: "openclaw.tasks.market_status_pipeline.task_calendar_refresh"
+    schedule:
+      crontab:
+        hour: 8
+        minute: 30
+        day_of_week: "1-5"
+    description: "日历刷新 (08:30 CST, 重新拉取adata+YAML)"
+
+  emergency_scan:
+    task: "openclaw.tasks.market_status_pipeline.task_emergency_scan"
+    schedule:
+      crontab:
+        minute: "*/15"
+        hour: "8-9"
+        day_of_week: "1-5"
+    description: "突发事件扫描 (08:00-09:45 每15分钟, 情报关键词匹配)"
+
+  # v26.0 FR-CF009: Capital flow anomaly scan (every 10 min during trading hours)
+  capital_flow_scan:
+    task: "openclaw.tasks.capital_flow_pipeline.task_capital_flow_scan"
+    schedule:
+      crontab:
+        minute: "*/10"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "资金异动扫描 (交易时段每10分钟)"
+
+  # I-008: Intelligence hub auto-refresh (every 30 min, 07:00-23:00, all days)
+  intel_refresh:
+    task: "openclaw.tasks.intel_refresh_pipeline.task_intel_refresh"
+    schedule:
+      crontab:
+        minute: "*/30"
+        hour: "7-23"
+        day_of_week: "*"
+    description: "情报中心自动刷新 (每30分钟, 7-23时)"
+
+  # v3.2 FR-GM001: Global market snapshot (every 15 min, 07:00-23:00, all days)
+  global_market_snapshot:
+    task: "openclaw.tasks.global_market_pipeline.task_fetch_global_snapshot"
+    schedule:
+      crontab:
+        minute: "*/15"
+        hour: "7-23"
+        day_of_week: "*"
+    description: "全球市场快照 (每15分钟, 7-23时, 含假期)"
+
+  # v28.0: Smart stock recommendation generation (every 10 min during trading hours)
+  recommendation_generate:
+    task: "openclaw.tasks.recommendation_pipeline.task_recommendation_generate"
+    schedule:
+      crontab:
+        minute: "*/10"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "智能选股推荐生成 (交易时段每10分钟)"
+
+  # v28.0: Recommendation outcome backfill (daily at 16:45)
+  recommendation_backfill:
+    task: "openclaw.tasks.recommendation_backfill.task_recommendation_backfill"
+    schedule:
+      crontab:
+        hour: 16
+        minute: 45
+        day_of_week: "1-5"
+    description: "推荐结果回填 T+N 实际表现 (16:45 CST)"
+
+  # I-068: LLM result pre-warming (market overview + sentiment report every 30min, hot stocks pre-open)
+  prewarm_market_overview:
+    task: "openclaw.tasks.llm_prewarm_pipeline.task_prewarm_market_overview"
+    schedule:
+      crontab:
+        minute: "*/30"
+        hour: "9-16"
+        day_of_week: "1-5"
+    description: "LLM大盘情绪预热 (交易时段每30分钟)"
+
+  prewarm_sentiment_report:
+    task: "openclaw.tasks.llm_prewarm_pipeline.task_prewarm_sentiment_report"
+    schedule:
+      crontab:
+        minute: "*/30"
+        hour: "9-16"
+        day_of_week: "1-5"
+    description: "LLM舆情日报预热 (交易时段每30分钟)"
+
+  prewarm_hot_stocks_preopen:
+    task: "openclaw.tasks.llm_prewarm_pipeline.task_prewarm_hot_stocks"
+    schedule:
+      crontab:
+        hour: 9
+        minute: 25
+        day_of_week: "1-5"
+    description: "LLM热门股分析预热 (开盘前09:25)"
+
+  # Proxy health check + Surge auto-remediation (every 10 min, 7-23, all days)
+  proxy_health_check:
+    task: "openclaw.tasks.proxy_health_pipeline.task_proxy_health_check"
+    schedule:
+      crontab:
+        minute: "*/10"
+        hour: "7-23"
+        day_of_week: "*"
+    description: "代理健康检查 (每10分钟, 7-23时)"
+
+  # Research workstation: Sentinel capture (every 30 min during trading hours)
+  research_sentinel_capture:
+    task: "openclaw.tasks.research_pipeline.task_sentinel_capture"
+    schedule:
+      crontab:
+        minute: "*/30"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "哨兵情绪扫描 (交易时段每30分钟)"
+
+  # Research workstation: Data aggregation (daily after close)
+  research_aggregate:
+    task: "openclaw.tasks.research_pipeline.task_research_aggregate"
+    schedule:
+      crontab:
+        hour: 15
+        minute: 35
+        day_of_week: "1-5"
+    description: "研究信号聚合 (收盘后15:35 CST)"
+
+  # v34.0: Black swan scan (every 15 min during trading hours)
+  black_swan_scan:
+    task: "openclaw.tasks.intelligence_pipeline.black_swan_scan"
+    schedule:
+      crontab:
+        minute: "*/15"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "黑天鹅指标扫描 (交易时段每15分钟)"
+
+  # v34.0: Portfolio macro sensitivity scan (every 2 hours during trading)
+  portfolio_macro_scan:
+    task: "openclaw.tasks.intelligence_pipeline.portfolio_macro_scan"
+    schedule:
+      crontab:
+        minute: 30
+        hour: "9,11,13,15"
+        day_of_week: "1-5"
+    description: "持仓宏观敏感度扫描 (交易时段每2小时)"
+
+  # v34.0: Portfolio rotation scan (every 2h during trading)
+  rotation_scan:
+    task: "openclaw.tasks.intelligence_pipeline.rotation_scan"
+    schedule:
+      crontab:
+        minute: 30
+        hour: "9,11,13,15"
+        day_of_week: "1-5"
+    description: "组合轮动扫描 (交易时段每2小时)"
+
+  # v34.0: Daily portfolio snapshot (post-close)
+  portfolio_snapshot:
+    task: "openclaw.tasks.intelligence_pipeline.portfolio_snapshot"
+    schedule:
+      crontab:
+        hour: 15
+        minute: 5
+        day_of_week: "1-5"
+    description: "持仓净值快照 (收盘后15:05 CST)"
+
+  # v35.0: Autonomous Trading Loop — OODA cycle (every 15 min during trading)
+  trading_loop_cycle:
+    task: "openclaw.tasks.trading_loop.task_trading_loop_cycle"
+    schedule:
+      crontab:
+        minute: "*/15"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "自主决策循环 (交易时段每15分钟)"
+
+  # v35.0: Morning briefing (08:00 Mon-Fri)
+  trading_loop_premarket:
+    task: "openclaw.tasks.trading_loop.task_trading_loop_premarket"
+    schedule:
+      crontab:
+        hour: 8
+        minute: 0
+        day_of_week: "1-5"
+    description: "晨间简报 (08:00 CST)"
+
+  # v35.0: Evening review (15:30 Mon-Fri)
+  trading_loop_postmarket:
+    task: "openclaw.tasks.trading_loop.task_trading_loop_postmarket"
+    schedule:
+      crontab:
+        hour: 15
+        minute: 30
+        day_of_week: "1-5"
+    description: "收盘复盘 (15:30 CST)"
+
+  # v35.0: Decision outcome backfill (16:45 Mon-Fri)
+  decision_backfill:
+    task: "openclaw.tasks.decision_backfill.task_decision_backfill"
+    schedule:
+      crontab:
+        hour: 16
+        minute: 45
+        day_of_week: "1-5"
+    description: "决策结果回填 T+N (16:45 CST)"
+
+  # v35.0: Overnight research (20:00 Mon-Fri)
+  trading_loop_overnight:
+    task: "openclaw.tasks.trading_loop.task_trading_loop_overnight"
+    schedule:
+      crontab:
+        hour: 20
+        minute: 0
+        day_of_week: "1-5"
+    description: "夜间研究 (20:00 CST)"
+
+  # v28.0: Recommendation cleanup (daily at 18:00)
+  recommendation_cleanup:
+    task: "openclaw.tasks.recommendation_cleanup.task_recommendation_cleanup"
+    schedule:
+      crontab:
+        hour: 18
+        minute: 30
+        day_of_week: "1-5"
+    description: "过期推荐清理 (每日18:30)"
+
+# v3.2 FR-SS001: Timeline scheduling profiles
+timeline:
+  profiles:
+    trading_day:
+      default: true
+    holiday:
+      default: false
+      tasks:
+        task_fetch_global_snapshot: true  # Global markets run during holidays
+        task_holiday_summary: true  # Holiday preview fires day-before at 18:00
+        task_intel_refresh: true  # Intel refresh runs during holidays (news doesn't stop)
+    pre_market:
+      default: true
+      tasks:
+        task_calendar_refresh: true  # Always refresh calendar in pre-market
+        task_emergency_scan: true  # Always scan for emergencies in pre-market
+    after_hours:
+      default: true
+      tasks:
+        task_sentiment_scan: false  # No sentiment scan after hours
+
+proxy_health:
+  targets:
+    - name: gemini_api
+      url: "https://generativelanguage.googleapis.com/"
+      timeout: 10
+      critical: true
+    - name: yahoo_finance
+      url: "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=1d&interval=1d"
+      timeout: 10
+      critical: true
+    - name: duckduckgo
+      url: "https://duckduckgo.com/"
+      timeout: 10
+      critical: false
+  surge_policy_group: "Proxy"
+  hk_fallback_nodes: []          # 用户配置 HK 节点名，如 ["HK-01", "HK-02"]
+  benchmark_wait_seconds: 15
+
+pipeline:
+  max_retries: 3
+  retry_delay_seconds: 60

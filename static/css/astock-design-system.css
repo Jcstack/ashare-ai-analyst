@@ -1,0 +1,132 @@
+/*
+ * A-Share Design System — Custom Properties & Utility Classes
+ *
+ * Color convention follows Chinese A-share market:
+ *   涨 (up/bullish)  = RED   #EF5350
+ *   跌 (down/bearish) = GREEN #26A69A
+ *
+ * This is the OPPOSITE of Western markets.
+ */
+
+/* ================================================================
+   CSS Custom Properties (Design Tokens)
+   ================================================================ */
+
+:root {
+  /* Market colors — 涨红跌绿 */
+  --color-up: #EF5350;
+  --color-down: #26A69A;
+
+  /* Signal colors */
+  --color-buy: #26A69A;
+  --color-sell: #EF5350;
+  --color-hold: #FFA726;
+  --color-wait: #78909C;
+
+  /* Risk colors */
+  --color-risk-low: #66BB6A;
+  --color-risk-medium: #FFA726;
+  --color-risk-high: #EF5350;
+
+  /* Brand / Primary */
+  --color-primary: #1976D2;
+  --color-primary-dark: #1565C0;
+
+  /* Typography */
+  --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+
+  /* Price scale sizes */
+  --price-xs: 0.875rem;
+  --price-sm: 1rem;
+  --price-base: 1.25rem;
+  --price-lg: 1.5rem;
+  --price-xl: 2rem;
+  --price-2xl: 2.5rem;
+}
+
+/* ================================================================
+   Utility Classes
+   ================================================================ */
+
+/* Market direction colors */
+.text-up { color: var(--color-up) !important; }
+.text-down { color: var(--color-down) !important; }
+.text-flat { color: var(--color-wait) !important; }
+
+.bg-up { background-color: var(--color-up) !important; }
+.bg-down { background-color: var(--color-down) !important; }
+.bg-up-subtle { background-color: rgba(239, 83, 80, 0.1) !important; }
+.bg-down-subtle { background-color: rgba(38, 166, 154, 0.1) !important; }
+
+/* Signal badges */
+.signal-buy { color: white; background-color: var(--color-buy); }
+.signal-sell { color: white; background-color: var(--color-sell); }
+.signal-hold { color: white; background-color: var(--color-hold); }
+.signal-wait { color: white; background-color: var(--color-wait); }
+
+/* Risk badges */
+.risk-low { color: white; background-color: var(--color-risk-low); }
+.risk-medium { color: white; background-color: var(--color-risk-medium); }
+.risk-high { color: white; background-color: var(--color-risk-high); }
+
+/* Price typography */
+.price-xs { font-family: var(--font-mono); font-size: var(--price-xs); }
+.price-sm { font-family: var(--font-mono); font-size: var(--price-sm); }
+.price-base { font-family: var(--font-mono); font-size: var(--price-base); }
+.price-lg { font-family: var(--font-mono); font-size: var(--price-lg); }
+.price-xl { font-family: var(--font-mono); font-size: var(--price-xl); font-weight: 700; }
+.price-2xl { font-family: var(--font-mono); font-size: var(--price-2xl); font-weight: 700; }
+
+/* Mono font for numbers */
+.font-mono-price {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chart container loading state */
+.chart-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+
+/* Smooth htmx transitions */
+.htmx-indicator {
+  opacity: 0;
+  transition: opacity 200ms ease-in;
+}
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  opacity: 1;
+}
+
+/* Swap animation */
+.htmx-swapping {
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+.htmx-settling {
+  opacity: 1;
+  transition: opacity 200ms ease-in;
+}
+
+/* Sidebar active link */
+.nav-link-active {
+  background-color: oklch(var(--p) / 0.1);
+  color: oklch(var(--p));
+  font-weight: 600;
+}
+
+/* Scrollbar styling */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: oklch(var(--bc) / 0.2);
+  border-radius: 3px;
+}

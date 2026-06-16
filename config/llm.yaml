@@ -1,0 +1,215 @@
+# Multi-LLM 配置 (Multi-LLM Configuration)
+
+providers:
+  claude_code:
+    enabled: true  # Primary — routes through Claude Code bridge (no API key needed)
+    requires_api_key: false
+    default_model: "sonnet"  # Claude Code model alias
+    models:
+      sonnet:
+        cost_per_1k_input: 0.0
+        cost_per_1k_output: 0.0
+        quality_score: 0.93
+      opus:
+        cost_per_1k_input: 0.0
+        cost_per_1k_output: 0.0
+        quality_score: 0.98
+    rate_limit:
+      requests_per_minute: 500  # Claude Code has no meaningful rate limit
+
+  anthropic:
+    enabled: false  # Disabled — no API key; using Claude Code bridge instead
+    default_model: "claude-sonnet-4-6"
+    models:
+      claude-sonnet-4-6:
+        cost_per_1k_input: 0.003
+        cost_per_1k_output: 0.015
+        quality_score: 0.93
+      claude-opus-4-6:
+        cost_per_1k_input: 0.015
+        cost_per_1k_output: 0.075
+        quality_score: 0.98
+      claude-haiku-3-5:
+        cost_per_1k_input: 0.0008
+        cost_per_1k_output: 0.004
+        quality_score: 0.80
+    rate_limit:
+      requests_per_minute: 50
+
+  openai:
+    enabled: false
+    default_model: "gpt-4o"
+    models:
+      gpt-4o:
+        cost_per_1k_input: 0.0025
+        cost_per_1k_output: 0.01
+        quality_score: 0.90
+      gpt-4o-mini:
+        cost_per_1k_input: 0.00015
+        cost_per_1k_output: 0.0006
+        quality_score: 0.78
+      gpt-4-turbo:
+        cost_per_1k_input: 0.01
+        cost_per_1k_output: 0.03
+        quality_score: 0.88
+    rate_limit:
+      requests_per_minute: 60
+
+  google:
+    enabled: true  # Fallback — used for complete_with_tools() (agent tool loops)
+    default_model: "gemini-2.5-flash"
+    fallback_model: "gemini-2.0-flash"
+    models:
+      gemini-2.5-flash:
+        cost_per_1k_input: 0.00015
+        cost_per_1k_output: 0.0006
+        quality_score: 0.88
+      gemini-2.0-flash:
+        cost_per_1k_input: 0.0001
+        cost_per_1k_output: 0.0004
+        quality_score: 0.82
+    rate_limit:
+      requests_per_minute: 500  # Tier 1 quota: 2000 RPM; 500 covers peak concurrency with safety margin
+
+rate_limiting:
+  cache_ttl: 60          # Dedup cache TTL in seconds
+  cache_max_size: 100    # Max cached responses
+
+# Caller-based model routing: map caller prefixes to specific models.
+# Callers not listed here use the provider's default_model (gemini-2.5-flash).
+# Longest-prefix matching: "holiday_research.qa" wins over "holiday_research".
+#
+# After Gemini 3 retirement (2026-03-03), all Gemini callers use the
+# unified default (2.5-flash). Deep analysis is handled by Claude Code
+# personas instead. The map is kept empty but the mechanism remains for
+# future per-caller overrides if needed.
+caller_model_map: {}
+
+# Dynamic upgrade rules — disabled.
+# Previously upgraded 2.5-flash → 3-flash on keyword/context triggers.
+# Now unnecessary: simple → 2.5-flash, deep → Claude Code personas.
+upgrade_rules: {}
+
+# Gemini Grounding — Google Search augmentation for complete() calls.
+# Disabled — Gemini is no longer the primary provider.
+grounding:
+  enabled: false
+  enabled_callers:
+    - "review_agent"
+    - "trading_advisor"
+    - "sentiment_report"
+    - "conversation_service"
+    - "holiday_research"
+    - "intel_analysis"
+  free_tier_daily_limit: 1500
+
+# Claude Code bridge (host-side service wrapping claude CLI)
+claude_code_bridge:
+  url: "http://host.docker.internal:19821"  # Docker 内访问宿主机
+  host_url: "http://localhost:19821"         # 宿主机直接访问
+  timeout: 900
+  model: "opus"  # alias — claude CLI 自动解析为最新 Opus 模型
+  auto_route:
+    enabled: true
+    min_message_length: 100
+    keywords:
+      - "深度分析"
+      - "全面分析"
+      - "详细研究"
+      - "深入研究"
+      - "产业链"
+      - "护城河"
+      - "商业模式"
+      - "估值模型"
+      - "因子分析"
+      - "对比分析"
+      - "专家分析"
+      - "深度模式"
+    persona_mapping:
+      industry: "architect"     # 产业链/护城河/商业模式
+      ai_tech: "ai_architect"   # AI/算力/芯片
+      financial: "analyst"      # 估值/财报/基本面
+      quant: "quant"            # 因子/量化/回测
+      portfolio: "investor"     # 组合/仓位/风控
+      default: "analyst"
+
+# Persona definitions for chat threads
+personas:
+  default:
+    display_name: "默认助手"
+    description: "通用 A 股投资分析助手"
+    backend: "claude_code"
+    icon: "default"
+    system_prompt_overlay: ""
+
+  architect:
+    display_name: "架构师"
+    description: "系统架构、产业链上下游、商业模式护城河分析"
+    backend: "claude_code"
+    icon: "architect"
+    system_prompt_overlay: >-
+      你同时具备专业架构师视角，擅长从系统架构、产业链上下游、
+      商业模式护城河的角度分析公司竞争力与估值逻辑。
+
+  ai_architect:
+    display_name: "AI 架构师"
+    description: "AI 技术栈、算力布局、数据资产价值评估"
+    backend: "claude_code"
+    icon: "ai"
+    system_prompt_overlay: >-
+      你同时具备 AI 架构师视角，擅长评估公司的 AI 技术栈、算力布局、
+      数据资产价值，以及 AI 应用对业务的赋能潜力。
+
+  analyst:
+    display_name: "分析师"
+    description: "财报深度拆解、行业比较、估值模型构建"
+    backend: "claude_code"
+    icon: "analyst"
+    system_prompt_overlay: >-
+      你同时具备资深分析师视角，擅长财报深度拆解、行业比较分析、
+      估值模型构建，给出严谨的投资逻辑链。
+
+  quant:
+    display_name: "量化分析师"
+    description: "因子分析、统计套利、回测验证"
+    backend: "claude_code"
+    icon: "quant"
+    system_prompt_overlay: >-
+      你同时具备量化分析师视角，擅长因子分析、统计套利逻辑、
+      回测验证，用数据驱动的方式评估投资机会。
+
+  investor:
+    display_name: "专业投资者"
+    description: "组合配置、仓位管理、风险控制、择时策略"
+    backend: "claude_code"
+    icon: "investor"
+    system_prompt_overlay: >-
+      你同时具备专业投资者视角，擅长组合配置、仓位管理、
+      风险控制、择时策略，注重资金效率和回撤控制。
+
+routing:
+  default_strategy: "quality"
+  timeout_per_provider: 900
+  timeout_total: 1200
+  fallback_acquire_timeout: 30
+  hybrid_weights:
+    cost: 0.4
+    quality: 0.6
+  fallback_order:
+    - "claude_code"
+    - "google"
+    - "anthropic"
+    - "openai"
+
+consensus:
+  enabled: false
+  min_providers: 2
+  provider_weights:
+    anthropic: 0.4
+    openai: 0.35
+    google: 0.25
+  agreement_threshold: 0.6
+
+key_storage:
+  method: "encrypted_file"
+  file_path: "config/.llm_keys.enc"

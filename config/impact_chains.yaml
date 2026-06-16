@@ -1,0 +1,48 @@
+# Impact Chain Templates Configuration
+# Per PRD v34.0 FR-GI002: Event-to-asset transmission chain templates
+# These supplement the code-defined CHAIN_TEMPLATES in impact_chain.py
+
+# Template override/extension (merged with code defaults)
+# Format: template_key -> {trigger_type, paths[]}
+# See src/intelligence/impact_chain.py for full dataclass spec
+
+# Event keyword → template mapping
+keywords:
+  oil_surge: ["原油", "油价", "OPEC", "石油", "oil"]
+  usd_strengthen: ["美元走强", "美元升值", "DXY上涨", "dollar rally"]
+  usd_weaken: ["美元走弱", "美元贬值", "DXY下跌"]
+  geopolitical_war: ["战争", "冲突", "军事", "袭击", "制裁", "入侵"]
+  fed_hawkish: ["加息", "鹰派", "紧缩", "hawkish", "rate hike"]
+  fed_dovish: ["降息", "鸽派", "宽松", "dovish", "rate cut"]
+  gold_surge: ["黄金大涨", "金价飙升", "gold surge"]
+
+# Sector → representative main-board stocks (for rotation engine)
+sector_stocks:
+  黄金:
+    - { symbol: "002155", name: "湖南黄金" }
+    - { symbol: "600489", name: "中金黄金" }
+    - { symbol: "600547", name: "山东黄金" }
+  石油:
+    - { symbol: "601857", name: "中国石油" }
+    - { symbol: "600028", name: "中国石化" }
+  银行:
+    - { symbol: "600036", name: "招商银行" }
+    - { symbol: "601398", name: "工商银行" }
+  消费:
+    - { symbol: "600519", name: "贵州茅台" }
+    - { symbol: "000858", name: "五粮液" }
+  军工:
+    - { symbol: "600893", name: "航发动力" }
+    - { symbol: "600760", name: "中航沈飞" }
+  纺织服装:
+    - { symbol: "000726", name: "鲁泰纺织" }
+    - { symbol: "600398", name: "海澜之家" }
+  航空:
+    - { symbol: "600115", name: "东方航空" }
+    - { symbol: "601111", name: "中国国航" }
+
+# Persistence settings
+persistence:
+  enabled: true
+  db_path: "data/impact_chains.db"
+  max_chains: 10000  # Max stored chains before pruning old entries

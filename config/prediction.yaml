@@ -1,0 +1,27 @@
+# 预测层配置 (Prediction Layer Config)
+
+model:
+  name: "claude-sonnet-4-5-20250929"
+  max_tokens: 4096
+  temperature: 0.3
+
+retry:
+  max_attempts: 3
+  base_delay_seconds: 1
+  max_delay_seconds: 30
+
+evaluation:
+  direction_accuracy_threshold: 0.6
+  price_range_tolerance: 0.05
+  min_confidence: 0.5
+
+output_schema:
+  required_fields:
+    - trend
+    - signal
+    - confidence
+    - risk_level
+    - reasoning
+    - target_price_range
+    - key_factors
+    - risk_warnings

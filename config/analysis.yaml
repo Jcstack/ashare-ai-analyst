@@ -1,0 +1,55 @@
+# 技术分析配置 (Technical Analysis Config)
+
+indicators:
+  moving_averages:
+    - period: 5
+      type: "MA"
+    - period: 10
+      type: "MA"
+    - period: 20
+      type: "MA"
+    - period: 60
+      type: "MA"
+    - period: 12
+      type: "EMA"
+    - period: 26
+      type: "EMA"
+
+  macd:
+    fast_period: 12
+    slow_period: 26
+    signal_period: 9
+
+  rsi:
+    period: 14
+    overbought: 70
+    oversold: 30
+
+  kdj:
+    k_period: 9
+    d_period: 3
+    j_smooth: 3
+
+  bollinger:
+    period: 20
+    std_dev: 2
+
+  volume:
+    obv: true
+    vwap: true
+
+patterns:
+  candlestick:
+    enabled: true
+    # 常见K线形态
+    detect:
+      - hammer        # 锤子线
+      - engulfing      # 吞没形态
+      - doji           # 十字星
+      - morning_star   # 早晨之星
+      - evening_star   # 黄昏之星
+
+  support_resistance:
+    enabled: true
+    lookback_days: 60
+    min_touches: 2

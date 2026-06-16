@@ -1,0 +1,19 @@
+# 通知配置 (Notification Config)
+
+discord:
+  enabled: true
+  # webhook_url loaded from DISCORD_WEBHOOK_URL env var
+  timeout_seconds: 10
+  max_retries: 3
+  retry_delay_seconds: 2
+
+  templates:
+    analysis_alert:
+      color: 3447003  # Blue
+      title_template: "{symbol} — AI分析预警"
+    daily_summary:
+      color: 5763719  # Green
+      title_template: "每日分析摘要 — {date}"
+    error_alert:
+      color: 15548997  # Red
+      title_template: "系统错误告警"

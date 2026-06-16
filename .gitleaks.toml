@@ -1,0 +1,16 @@
+# gitleaks configuration
+# Extends the default ruleset and allowlists vetted, non-secret false positives.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Vetted false positives: unit-test mock keys and the public EastMoney UT token"
+paths = [
+  '''tests/.*''',
+]
+regexes = [
+  # Public, well-known EastMoney push2 `ut` query-parameter constant (shared across the
+  # akshare ecosystem; not a personal secret).
+  '''bd1d9ddb04089700cf9c27f6f7426281''',
+]

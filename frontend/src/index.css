@@ -1,0 +1,611 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  /* === Radius scale (computed from --radius base) === */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+
+  /* === shadcn backward-compat color mappings === */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-market-up: var(--market-up);
+  --color-market-down: var(--market-down);
+  --color-market-flat: var(--market-flat);
+
+  /* === v10 Design System: new semantic color mappings === */
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-bg-hover: var(--bg-hover);
+  --color-bg-active: var(--bg-active);
+
+  --color-border-default: var(--border-default);
+  --color-border-strong: var(--border-strong);
+  --color-border-subtle: var(--border-subtle);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-disabled: var(--text-disabled);
+
+  --color-up: var(--semantic-up);
+  --color-down: var(--semantic-down);
+  --color-flat: var(--semantic-flat);
+  --color-warning: var(--semantic-warning);
+  --color-info: var(--semantic-info);
+  --color-danger: var(--semantic-danger);
+
+  --color-accent-brand: var(--accent-primary);
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-agent: var(--accent-agent);
+  --color-accent-agent-surface: var(--accent-agent-surface);
+}
+
+/* ============================================================
+   v10 Institutional Dark Console — Token System
+   Dark-first: :root is dark, .light overrides
+   ============================================================ */
+:root {
+  --radius: 0.5rem;
+
+  /* === v10 Canonical Tokens === */
+
+  /* Surfaces */
+  --bg-base: oklch(0.13 0.005 270);
+  --bg-surface: oklch(0.16 0.005 270);
+  --bg-elevated: oklch(0.19 0.005 270);
+  --bg-hover: oklch(0.20 0.005 270);
+  --bg-active: oklch(0.22 0.005 270);
+
+  /* Borders */
+  --border-default: oklch(0.24 0.005 270);
+  --border-strong: oklch(0.30 0.005 270);
+  --border-subtle: oklch(0.18 0.005 270);
+
+  /* Text */
+  --text-primary: oklch(0.93 0.005 270);
+  --text-secondary: oklch(0.68 0.01 270);
+  --text-secondary-foreground: oklch(0.93 0 0);
+  --text-tertiary: oklch(0.48 0.01 270);
+  --text-disabled: oklch(0.36 0.01 270);
+
+  /* Semantic colors */
+  --semantic-up: oklch(0.62 0.19 25);
+  --semantic-down: oklch(0.70 0.19 145);
+  --semantic-flat: oklch(0.48 0.01 270);
+  --semantic-warning: oklch(0.70 0.16 80);
+  --semantic-info: oklch(0.65 0.15 250);
+  --semantic-danger: oklch(0.62 0.19 25);
+
+  /* Accent */
+  --accent-primary: oklch(0.58 0.15 270);
+  --accent-agent: oklch(0.52 0.14 270);
+  --accent-agent-surface: oklch(0.15 0.01 270);
+
+  /* === Backward-compat aliases (old shadcn tokens → new canonical) === */
+  --background: var(--bg-base);
+  --foreground: var(--text-primary);
+  --card: var(--bg-surface);
+  --card-foreground: var(--text-primary);
+  --popover: var(--bg-elevated);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--accent-primary);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: var(--bg-active);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--bg-hover);
+  --muted-foreground: var(--text-secondary);
+  --accent: var(--bg-active);
+  --accent-foreground: var(--text-primary);
+  --destructive: var(--semantic-danger);
+  --border: var(--border-default);
+  --input: var(--border-strong);
+  --ring: var(--accent-primary);
+  --chart-1: oklch(0.65 0.2 264);
+  --chart-2: oklch(0.65 0.17 162);
+  --chart-3: oklch(0.65 0.18 70);
+  --chart-4: oklch(0.65 0.22 304);
+  --chart-5: oklch(0.65 0.22 16);
+  --chart-6: oklch(0.65 0.19 22);
+  --chart-7: oklch(0.65 0.2 141);
+  --chart-8: oklch(0.65 0.16 277);
+  --sidebar: oklch(0.11 0.005 270);
+  --sidebar-foreground: var(--text-primary);
+  --sidebar-primary: var(--accent-primary);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: var(--bg-hover);
+  --sidebar-accent-foreground: var(--text-primary);
+  --sidebar-border: var(--border-default);
+  --sidebar-ring: var(--accent-primary);
+
+  /* Surface elevated (legacy alias) */
+  --surface-elevated: var(--bg-elevated);
+
+  /* Market colors — backward-compat aliases */
+  --market-up: var(--semantic-up);
+  --market-down: var(--semantic-down);
+  --market-flat: var(--semantic-flat);
+
+  /* Semantic status colors (legacy aliases) */
+  --color-warning: var(--semantic-warning);
+  --color-info: var(--semantic-info);
+
+  /* Signal colors (legacy) */
+  --color-signal-buy: var(--semantic-down);
+  --color-signal-sell: var(--semantic-up);
+  --color-signal-hold: var(--semantic-warning);
+  --color-signal-wait: var(--semantic-flat);
+
+  /* Risk colors (legacy) */
+  --color-risk-low: var(--semantic-down);
+  --color-risk-medium: var(--semantic-warning);
+  --color-risk-high: var(--semantic-up);
+
+  /* Agent colors — simplified (no gradient/glow/shimmer) */
+  --color-agent: var(--accent-agent);
+  --color-agent-surface: var(--accent-agent-surface);
+  --color-agent-border: oklch(0.52 0.14 270 / 25%);
+  --color-agent-text: oklch(0.75 0.06 270);
+
+  /* Typography */
+  --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', ui-monospace, monospace;
+
+  /* Transitions */
+  --transition-fast: 120ms ease;
+  --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Spacing */
+  --space-unit: 4px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+}
+
+/* Light theme override */
+.light {
+  /* v10 canonical tokens — light */
+  --bg-base: oklch(0.98 0 0);
+  --bg-surface: oklch(1 0 0);
+  --bg-elevated: oklch(1 0 0);
+  --bg-hover: oklch(0.96 0 0);
+  --bg-active: oklch(0.91 0 0);
+  --border-default: oklch(0.91 0 0);
+  --border-strong: oklch(0.85 0 0);
+  --border-subtle: oklch(0.95 0 0);
+  --text-primary: oklch(0.14 0.005 270);
+  --text-secondary: oklch(0.40 0.01 270);
+  --text-secondary-foreground: oklch(0.14 0.005 270);
+  --text-tertiary: oklch(0.65 0.01 270);
+  --text-disabled: oklch(0.78 0 0);
+  --semantic-up: oklch(0.55 0.22 25);
+  --semantic-down: oklch(0.55 0.22 145);
+  --semantic-flat: oklch(0.55 0.01 270);
+  --semantic-warning: oklch(0.60 0.18 80);
+  --semantic-info: oklch(0.55 0.18 250);
+  --semantic-danger: oklch(0.55 0.22 25);
+  --accent-primary: oklch(0.48 0.18 270);
+  --accent-agent: oklch(0.45 0.16 270);
+  --accent-agent-surface: oklch(0.96 0.01 270);
+
+  /* Backward-compat overrides for shadcn — derived from canonical */
+  --primary-foreground: oklch(0.98 0 0);
+  --sidebar: oklch(0.98 0 0);
+  --color-agent: var(--accent-agent);
+  --color-agent-surface: var(--accent-agent-surface);
+  --color-agent-border: oklch(0.45 0.16 270 / 20%);
+  --color-agent-text: oklch(0.35 0.1 270);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+  }
+}
+
+/* ============================================================
+   Market Color Utility Classes (backward-compat)
+   ============================================================ */
+.text-market-up { color: var(--color-market-up); }
+.text-market-down { color: var(--color-market-down); }
+.text-market-flat { color: var(--color-market-flat); }
+.bg-market-up { background-color: var(--color-market-up); }
+.bg-market-down { background-color: var(--color-market-down); }
+.bg-market-flat { background-color: var(--color-market-flat); }
+.fill-market-up { fill: var(--color-market-up); }
+.fill-market-down { fill: var(--color-market-down); }
+.fill-market-flat { fill: var(--color-market-flat); }
+.border-market-up { border-color: var(--color-market-up); }
+.border-market-down { border-color: var(--color-market-down); }
+.border-market-flat { border-color: var(--color-market-flat); }
+
+/* ============================================================
+   v10 Typography Scale
+   ============================================================ */
+.type-page-title { font-size: 20px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; }
+.type-section-title { font-size: 14px; font-weight: 600; line-height: 1.4; }
+.type-body { font-size: 13px; font-weight: 400; line-height: 1.6; }
+.type-label { font-size: 12px; font-weight: 500; line-height: 1.3; letter-spacing: 0.01em; }
+.type-caption { font-size: 11px; font-weight: 500; line-height: 1.2; letter-spacing: 0.02em; }
+.type-overline { font-size: 10px; font-weight: 600; line-height: 1.2; letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* Legacy typography aliases */
+.text-display { font-size: 28px; font-weight: 700; line-height: 1.2; }
+.text-headline { font-size: 20px; font-weight: 600; line-height: 1.3; }
+.text-title { font-size: 16px; font-weight: 600; line-height: 1.4; }
+.text-body { font-size: 14px; font-weight: 400; line-height: 1.7; }
+.text-agent { font-size: 14px; font-weight: 400; line-height: 1.75; color: var(--color-agent-text); }
+.text-caption { font-size: 12px; font-weight: 500; line-height: 1.3; }
+.text-micro { font-size: 11px; font-weight: 500; line-height: 1.2; }
+
+/* ============================================================
+   v10 Numeric Typography
+   ============================================================ */
+.font-numeric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.price-hero {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.price-lg {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.price-md {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.price-sm {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.pct-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Numeric column alignment */
+.col-numeric {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* mono-numeric + tabular-nums: removed in v10.0, unified into .font-numeric */
+
+/* ============================================================
+   Card & Surface Utilities
+   ============================================================ */
+.card-hover {
+  transition: border-color var(--transition-normal);
+}
+.card-hover:hover {
+  border-color: var(--border-strong);
+}
+
+/* Agent card — v10: subtle left accent bar, no gradient/glow */
+.agent-surface {
+  background: var(--accent-agent-surface);
+  border-left: 2px solid var(--accent-agent);
+}
+
+.section-gap {
+  margin-bottom: 1.75rem;
+}
+
+/* dense-table: removed in v10.0, replaced by .data-table */
+
+/* ============================================================
+   v10 Financial Data Table
+   ============================================================ */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.data-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.data-table thead th {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.data-table tbody tr {
+  height: 36px;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background-color 80ms ease;
+}
+
+.data-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.data-table tbody td {
+  padding: 6px 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+/* Numeric columns */
+.data-table td[data-type="numeric"],
+.data-table th[data-type="numeric"] {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* PnL cells */
+.data-table td[data-pnl="positive"] { color: var(--semantic-up); }
+.data-table td[data-pnl="negative"] { color: var(--semantic-down); }
+.data-table td[data-pnl="zero"] { color: var(--semantic-flat); }
+
+/* Zebra striping (optional) */
+.data-table[data-striped] tbody tr:nth-child(even) {
+  background: var(--bg-base);
+}
+
+/* ============================================================
+   Data Row Hover
+   ============================================================ */
+.data-row-hover:hover {
+  background: var(--bg-hover);
+}
+
+/* ============================================================
+   Animations (v10: simplified — page-enter, price-flash, skeleton)
+   ============================================================ */
+
+/* Price change flash — unified */
+@keyframes price-up {
+  0% { background-color: oklch(0.62 0.19 25 / 8%); }
+  100% { background-color: transparent; }
+}
+
+@keyframes price-down {
+  0% { background-color: oklch(0.70 0.19 145 / 8%); }
+  100% { background-color: transparent; }
+}
+
+.flash-up {
+  animation: price-up 0.8s ease-out;
+}
+
+.flash-down {
+  animation: price-down 0.8s ease-out;
+}
+
+/* Page enter animation */
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: fadeSlideIn 0.2s ease-out;
+}
+
+/* Content reveal — layer expansion */
+@keyframes contentReveal {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.content-reveal {
+  animation: contentReveal 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Stagger enter — list items (retained for L2 dimension bars) */
+.stagger-enter > * {
+  animation: contentReveal 0.2s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+.stagger-enter > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-enter > *:nth-child(2) { animation-delay: 30ms; }
+.stagger-enter > *:nth-child(3) { animation-delay: 60ms; }
+.stagger-enter > *:nth-child(4) { animation-delay: 90ms; }
+.stagger-enter > *:nth-child(5) { animation-delay: 120ms; }
+.stagger-enter > *:nth-child(6) { animation-delay: 150ms; }
+.stagger-enter > *:nth-child(7) { animation-delay: 180ms; }
+
+/* Pulsing live indicator dot */
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--semantic-down);
+  animation: pulse-live 2s ease-in-out infinite;
+  display: inline-block;
+}
+
+.live-dot-warning {
+  background: var(--semantic-warning);
+}
+
+/* AI loading dots — simplified */
+@keyframes aiPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.ai-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent-agent);
+  animation: aiPulse 1.4s ease-in-out infinite;
+}
+.ai-dot:nth-child(2) { animation-delay: 0.2s; }
+.ai-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* Row highlight (new data) */
+@keyframes rowHighlight {
+  0% { background: oklch(0.58 0.15 270 / 8%); }
+  100% { background: transparent; }
+}
+
+.row-new {
+  animation: rowHighlight 2s ease-out;
+}
+
+/* ============================================================
+   Sentiment & Status
+   ============================================================ */
+.sentiment-positive {
+  color: var(--semantic-up);
+  background: oklch(0.62 0.19 25 / 10%);
+}
+
+.sentiment-negative {
+  color: var(--semantic-down);
+  background: oklch(0.70 0.19 145 / 10%);
+}
+
+.sentiment-neutral {
+  color: var(--semantic-flat);
+  background: oklch(0.48 0.01 270 / 10%);
+}
+
+/* ============================================================
+   Misc Utilities
+   ============================================================ */
+.risk-gauge {
+  width: 120px;
+  height: 60px;
+  overflow: hidden;
+  position: relative;
+}
+
+.alert-banner {
+  background: oklch(0.62 0.19 25 / 8%);
+  border-left: 2px solid var(--semantic-up);
+}
+
+.scroll-hidden {
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.scroll-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+/* ============================================================
+   Scrollbar Styling
+   ============================================================ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* Firefox scrollbar */
+* {
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.light ::-webkit-scrollbar-thumb {
+  background: oklch(0.80 0 0);
+}
+.light ::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.65 0 0);
+}
+.light * {
+  scrollbar-color: oklch(0.80 0 0) transparent;
+}

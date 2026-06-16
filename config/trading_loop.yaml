@@ -1,0 +1,46 @@
+# Autonomous Trading Agent — Core Loop Configuration
+
+trading_loop:
+  cycle_interval_minutes: 15
+  premarket_time: "08:00"
+  postmarket_time: "15:30"
+  overnight_time: "20:00"
+
+  # Decision thresholds
+  min_confidence_to_propose: 0.6
+  min_confidence_to_recommend_buy: 0.7
+
+  # Safety guardrails
+  max_daily_loss_pct: 0.03
+  max_position_pct: 0.30
+  max_sector_pct: 0.40
+  consecutive_loss_threshold: 3
+  consecutive_loss_size_factor: 0.5
+
+  # Debate config
+  debate_rounds_normal: 3
+  debate_rounds_deep: 5
+  debate_timeout_seconds: 30
+
+  # Thesis config
+  thesis_decay_hours: 72
+  thesis_decay_rate: 0.05
+
+  # T+1 constraints
+  overnight_risk_budget_pct: 0.05
+  near_limit_penalty_threshold: 0.08
+
+  # Confidence calibration (Phase 5)
+  calibration_lookback_days: 60
+  min_samples_for_calibration: 5
+  max_confidence_boost: 0.15
+  max_confidence_penalty: 0.20
+
+  # A-share constraints (Phase 6)
+  min_order_value: 1000
+  max_days_to_exit: 3
+  near_limit_threshold_pct: 0.08
+
+  # Signal aggregator
+  signal_dedup_window_hours: 1
+  max_signals_per_cycle: 10

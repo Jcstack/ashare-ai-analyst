@@ -1,0 +1,273 @@
+# v18.0 Agent Mesh Configuration — All 12 Agents
+# Defines specialist agents, their tool access, token budgets, and permissions.
+
+master:
+  description: "Orchestrator agent — decomposes tasks and delegates to specialists"
+  system_role: "你是投资分析团队的主管，负责理解用户需求、分解任务、分配给专业分析师，并汇总结论。"
+  max_tokens_per_request: 4096
+  max_delegation_depth: 2
+  temperature: 0.3
+
+agents:
+  # ── Gate-keeper ──────────────────────────────────────────
+
+  data_qa:
+    description: "Data quality gate-keeper — validates freshness, completeness, consistency"
+    system_role: "数据质量检查员：验证数据新鲜度、完整性和一致性。"
+    tools:
+      - get_realtime_quote
+      - get_technical_indicators
+      - check_trading_day
+    max_tokens_per_request: 1024
+    trust_zone_min: "LOW"
+    use_llm: false
+    temperature: 0.0
+
+  # ── Analysis tier ────────────────────────────────────────
+
+  analyst:
+    description: "Technical & fundamental analysis specialist"
+    system_role: >
+      你是一位专业的 A 股技术分析师。擅长技术指标解读、概念板块联动分析、跨市场关联评估。
+      基于数据给出客观的多空判断和置信度评分。不给出交易建议，只提供分析结论。
+      在协同决策中，你负责从技术面给出独立判断。输出必须包含:
+      technical_signal(bullish/neutral/bearish), technical_score(0-1),
+      key_levels(support/resistance), 以及投票理由。分析仅基于价量数据。
+    tools:
+      - get_realtime_quote
+      - get_technical_indicators
+      - get_stock_concepts
+      - get_concept_heat
+      - analyze_cross_market
+      - search_stocks
+      - search_intel
+      - get_trending_news
+      - get_fusion_signal
+      - get_alpha_factors
+      - run_debate
+      - check_trading_constraints
+    max_tokens_per_request: 8192
+    trust_zone_min: "LOW"
+    temperature: 0.2
+
+  sentiment:
+    description: "Dedicated sentiment & news analysis specialist"
+    system_role: >
+      你是一位市场舆情分析师。从新闻和社交媒体数据中提取市场情绪，
+      给出量化的情绪评分（-1到+1）和关键事件影响评估。
+      在协同决策中，你负责从情报+舆情+宏观环境给出独立判断。
+      必须综合最新情报信号、全球市场联动、地缘政治影响、板块轮动位置。
+      输出必须包含: sentiment_signal, sentiment_score, key_events。
+    tools:
+      - get_trending_news
+      - get_sentiment_report
+      - search_intel
+      - web_search
+      - get_global_markets
+    max_tokens_per_request: 8192
+    trust_zone_min: "LOW"
+    temperature: 0.2
+
+  regime:
+    description: "Market regime detection & macro analysis"
+    system_role: >
+      你是一位宏观分析师。判断当前市场 regime（牛市/熊市/震荡/转换期），
+      评估宏观环境对 A 股的影响，包括全球市场联动和政策面。
+      在协同决策中，你负责从宏观角度给出独立判断。
+      输出必须包含: regime_signal, regime_phase, macro_impact。
+    tools:
+      - get_global_markets
+      - get_holiday_impact
+      - analyze_cross_market
+      - check_trading_day
+      - detect_regime
+      - get_trending_news
+      - get_realtime_quote
+      - analyze_impact_chain
+      - analyze_position_macro
+    max_tokens_per_request: 8192
+    trust_zone_min: "LOW"
+    temperature: 0.2
+
+  # ── Validation tier ──────────────────────────────────────
+
+  backtest:
+    description: "Walk-forward validation & overfitting detection"
+    system_role: "信号回测验证：walk-forward 验证、过拟合检测、regime 敏感性分析。"
+    tools:
+      - backtest_strategy
+    max_tokens_per_request: 1024
+    trust_zone_min: "LOW"
+    use_llm: false
+    temperature: 0.0
+
+  # ── Risk tier ────────────────────────────────────────────
+
+  risk:
+    description: "Risk assessment specialist — evaluate only, no trade execution"
+    system_role: >
+      你是一位风控专家。评估交易提案的风险，检查仓位集中度、止损合理性、过拟合风险。
+      具备 VaR/CVaR 风险度量、压力测试、仓位计算和熔断监控能力。
+      你不能执行交易，只能评估和建议。始终保守评估，宁可错过机会也不要承担过大风险。
+      在协同决策中，你拥有一票否决权(veto=true → 强制 action=hold/reduce/sell)。
+      当风险等级为 CRITICAL/EXTREME 时必须行使否决权。
+    tools:
+      - get_realtime_quote
+      - get_portfolio
+      - get_trade_history
+      - check_trading_day
+      - calculate_var
+      - run_stress_test
+      - list_stress_scenarios
+      - calculate_position_size
+      - check_circuit_breaker
+      - get_fusion_signal
+      - check_trading_constraints
+      - run_munger_checklist
+    max_tokens_per_request: 8192
+    trust_zone_min: "MEDIUM"
+    temperature: 0.1
+
+  correlation:
+    description: "Cross-asset correlation & diversification scoring"
+    system_role: "关联性分析：计算资产相关性、集中度风险、分散化评分。"
+    tools:
+      - get_portfolio
+    max_tokens_per_request: 1024
+    trust_zone_min: "LOW"
+    use_llm: false
+    temperature: 0.0
+
+  # ── Construction tier ────────────────────────────────────
+
+  portfolio:
+    description: "Portfolio construction — suggests only, never executes"
+    system_role: >
+      你是一位组合构建专家。基于风险预算、相关性和信号强度建议最优仓位配置。
+      只建议，不执行交易。所有建议符合 A 股 100 股整数手和单仓位 <= 30% 限制。
+      在协同决策中，你是投票决策协调者。综合技术面、情绪面、宏观面的独立判断，
+      计算加权信号，输出最终 action + entry/target/stop + vote_detail。
+      如果 risk agent 行使否决权(veto=true)，你必须遵从否决。
+    tools:
+      - get_portfolio
+      - get_capital_balance
+      - calculate_position_size
+      - calculate_var
+      - get_watchlist
+      - get_trade_history
+      - get_realtime_quote
+      - get_fusion_signal
+      - get_alpha_factors
+      - scan_portfolio_rotation
+      - run_debate
+      - check_trading_constraints
+      - run_munger_checklist
+    max_tokens_per_request: 8192
+    trust_zone_min: "MEDIUM"
+    temperature: 0.1
+
+  exec_plan:
+    description: "Execution planning — creates gate requests, never executes directly"
+    system_role: "执行计划：创建确认门请求和模拟记录，不直接执行交易。"
+    tools:
+      - get_portfolio
+      - get_trade_history
+      - check_circuit_breaker
+    max_tokens_per_request: 1024
+    trust_zone_min: "HIGH"
+    use_llm: false
+    temperature: 0.0
+
+  # ── Execution tier ───────────────────────────────────────
+
+  trader:
+    description: "Trade execution specialist — rule engine, no LLM"
+    system_role: "执行交易指令的规则引擎，仅在风控审批通过后执行。"
+    tools:
+      - execute_trade
+      - record_manual_trade
+      - get_trade_history
+      - get_portfolio
+    max_tokens_per_request: 1024
+    trust_zone_min: "HIGH"
+    use_llm: false
+    temperature: 0.0
+
+  # ── Monitoring tier ──────────────────────────────────────
+
+  monitor:
+    description: "Prediction accuracy monitoring & drift detection"
+    system_role: "预测监控：跟踪预测准确率、检测模型漂移、标记需要重校准的标的。"
+    tools: []
+    max_tokens_per_request: 1024
+    trust_zone_min: "LOW"
+    use_llm: false
+    temperature: 0.0
+
+  # ── Report tier ──────────────────────────────────────────
+
+  report:
+    description: "Report synthesis with three-scenario analysis"
+    system_role: >
+      你是一位资深投资报告撰写专家。基于多维度分析结果撰写综合分析报告，
+      必须包含三种情景分析（乐观/中性/悲观），每个情景标注概率和风险等级。
+    tools: []
+    max_tokens_per_request: 16384
+    trust_zone_min: "LOW"
+    temperature: 0.3
+
+  # ── Evaluation tier ────────────────────────────────────
+
+  evaluator:
+    description: "Independent quality evaluator — rule-based checks + optional LLM meta-review"
+    system_role: "独立质量审计员：检查分析结论的维度一致性、置信度校准、风险提示完整性。"
+    tools: []
+    max_tokens_per_request: 512
+    trust_zone_min: "LOW"
+    use_llm: false
+    temperature: 0.0
+
+  # ── Legacy (kept for backward compatibility) ─────────────
+
+  research:
+    description: "Research specialist — news, sentiment, macro analysis (legacy, use sentiment + regime)"
+    system_role: >
+      你是一位投资研究员。专注于新闻舆情分析、市场情绪研判、全球宏观事件评估。
+      从海量信息中提炼关键要点，给出情绪评分和事件影响评估。
+    tools:
+      - get_trending_news
+      - get_sentiment_report
+      - get_global_markets
+      - search_stocks
+      - get_stock_advice
+      - get_holiday_impact
+    max_tokens_per_request: 8192
+    trust_zone_min: "LOW"
+    temperature: 0.3
+
+  # ── Sentinel tier (v20.0 Phase 7) ──────────────────────────────
+
+  sentinel:
+    display_name: "哨兵 Agent"
+    role: "Real-time signal monitoring and alert routing"
+    description: "Rule-based agent monitoring signal pipeline health, routing alerts, and detecting anomalies. No LLM required."
+    system_role: "哨兵监控：实时信号管道健康监测、告警路由、异常检测。规则引擎驱动，无需LLM。"
+    tools:
+      - signal_bus
+      - signal_store
+      - notification_orchestrator
+      - phase_engine
+      - data_source_manager
+    input_schema: "SentinelInput"
+    output_schema: "SentinelOutput"
+    max_tokens_per_request: 512
+    trust_zone_min: "MEDIUM"
+    use_llm: false
+    temperature: 0.0
+
+# Budget control
+budget:
+  max_tokens_per_thread: 80000
+  max_tool_calls_per_agent: 8
+  fallback_model: "gemini-2.5-flash"
+  budget_warning_threshold: 0.8

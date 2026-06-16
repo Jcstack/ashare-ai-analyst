@@ -1,0 +1,33 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps for Qlib (numpy, pandas, cython compilation)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Qlib from source (no ARM64 wheels on PyPI) + service deps
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.9.6
+RUN pip install --no-cache-dir \
+    numpy cython setuptools-scm \
+    && pip install --no-cache-dir \
+    "pyqlib @ git+https://github.com/microsoft/qlib.git" --no-build-isolation
+
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn[standard] \
+    pyyaml
+
+# Copy only what the service needs
+COPY config/ ./config/
+COPY scripts/qlib_worker.py scripts/qlib_service.py ./scripts/
+
+WORKDIR /app/scripts
+
+EXPOSE 8001
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=60s \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')" || exit 1
+
+CMD ["uvicorn", "qlib_service:app", "--host", "0.0.0.0", "--port", "8001"]

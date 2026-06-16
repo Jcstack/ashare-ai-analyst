@@ -1,0 +1,45 @@
+# Discord Bot Configuration
+# All IDs are resolved from environment variables at runtime.
+
+bot:
+  token_env: DISCORD_BOT_TOKEN
+
+# Guild (server) ID for slash command sync
+guild:
+  id_env: DISCORD_GUILD_ID
+
+# V1: single channel mode — all messages go to one channel
+channel:
+  id_env: DISCORD_CHANNEL_ID
+
+# Push notification types to forward to Discord
+push_types:
+  - market_overview
+  - sentiment_update
+  - recommendation
+  - intelligence_hub_refresh
+  - capital_flow_anomaly
+  - risk_alert
+
+# Embed color palette
+colors:
+  bullish: 0x00C853
+  bearish: 0xFF1744
+  neutral: 0x9E9E9E
+  alert: 0xFF9100
+  info: 0x2196F3
+
+# Rate limits
+rate_limits:
+  commands_per_minute: 10
+  nl_messages_per_minute: 5
+  agent_timeout: 900
+  analysis_timeout: 600
+  follow_up_timeout: 900
+
+# Multi-turn conversation settings
+conversation:
+  follow_up_button_timeout: 1800
+  idle_timeout: 1800
+  cleanup_interval: 300
+  end_keywords: ["结束", "结束对话", "关闭", "bye", "end"]

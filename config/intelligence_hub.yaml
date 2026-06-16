@@ -1,0 +1,442 @@
+# v23.0 Intelligence Hub Configuration
+# Multi-source intelligence aggregation with scoring, health tracking, and dedup.
+
+refresh_interval_seconds: 300
+retention_days: 30
+
+# ── Source Layer Taxonomy ─────────────────────────────────────────────
+# L1: Tier-1 wire services & regulators (highest trust)
+# L2: Central banks & government data releases
+# L3: Quality editorial / investigative journalism
+# L4: Aggregator & curated RSS (mixed quality)
+# L5: Social & community (lowest trust, needs verification)
+
+sources:
+  # ── L1: Regulators ─────────────────────────────────────────────────
+  policy_csrc:
+    type: policy
+    enabled: true
+    source_key: csrc
+    display_name: "证监会"
+    default_category: policy
+    layer: L1
+    base_weight: 1.0
+    compliance_level: HIGH
+    domain_tags: [china, regulation, equities]
+
+  policy_pboc:
+    type: policy
+    enabled: true
+    source_key: pboc
+    display_name: "央行"
+    default_category: policy
+    layer: L1
+    base_weight: 1.0
+    compliance_level: HIGH
+    domain_tags: [china, monetary_policy, macro]
+
+  policy_sse:
+    type: policy
+    enabled: true
+    source_key: sse
+    display_name: "上交所"
+    default_category: policy
+    layer: L1
+    base_weight: 0.95
+    compliance_level: HIGH
+    domain_tags: [china, exchange, equities]
+
+  policy_mof:
+    type: policy
+    enabled: true
+    source_key: mof
+    display_name: "财政部"
+    default_category: macro
+    layer: L1
+    base_weight: 0.95
+    compliance_level: HIGH
+    domain_tags: [china, fiscal_policy, macro]
+
+  # ── L1: Wire Services ──────────────────────────────────────────────
+  rss_reuters_world:
+    type: rss
+    enabled: true
+    display_name: "Reuters World"
+    feed_url: "https://www.reutersagency.com/feed/?taxonomy=best-sectors&post_type=best"
+    default_category: global
+    max_items: 20
+    layer: L1
+    base_weight: 0.95
+    compliance_level: HIGH
+    domain_tags: [global, macro, geopolitics]
+
+  # ── L2: Central Banks & Government ─────────────────────────────────
+  rss_fed_press:
+    type: rss
+    enabled: true
+    display_name: "Federal Reserve"
+    feed_url: "https://www.federalreserve.gov/feeds/press_all.xml"
+    default_category: macro
+    max_items: 20
+    layer: L2
+    base_weight: 0.90
+    compliance_level: HIGH
+    domain_tags: [us, monetary_policy, macro]
+
+  rss_ecb_press:
+    type: rss
+    enabled: true
+    display_name: "ECB Press"
+    feed_url: "https://www.ecb.europa.eu/rss/press.html"
+    default_category: macro
+    max_items: 15
+    layer: L2
+    base_weight: 0.85
+    compliance_level: HIGH
+    domain_tags: [europe, monetary_policy, macro]
+
+  rss_boj:
+    type: rss
+    enabled: true
+    display_name: "Bank of Japan"
+    feed_url: "https://www.boj.or.jp/en/rss/whatsnew.xml"
+    default_category: macro
+    max_items: 15
+    layer: L2
+    base_weight: 0.85
+    compliance_level: HIGH
+    domain_tags: [japan, monetary_policy, macro]
+
+  rss_who_news:
+    type: rss
+    enabled: true
+    display_name: "WHO News"
+    feed_url: "https://www.who.int/rss-feeds/news-english.xml"
+    default_category: global
+    max_items: 10
+    layer: L2
+    base_weight: 0.80
+    compliance_level: HIGH
+    domain_tags: [global, health, macro]
+
+  rss_eia_today:
+    type: rss
+    enabled: true
+    display_name: "EIA Today in Energy"
+    feed_url: "https://www.eia.gov/rss/todayinenergy.xml"
+    default_category: macro
+    max_items: 10
+    layer: L2
+    base_weight: 0.80
+    compliance_level: HIGH
+    domain_tags: [us, energy, commodities]
+
+  # ── L3: Quality Editorial / Business Media ─────────────────────────
+  rss_wsj_markets:
+    type: rss
+    enabled: true
+    display_name: "WSJ Markets"
+    feed_url: "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"
+    default_category: global
+    max_items: 20
+    layer: L3
+    base_weight: 0.80
+    compliance_level: MEDIUM
+    domain_tags: [us, equities, macro]
+
+  rss_ft_chinese:
+    type: rss
+    enabled: true
+    display_name: "FT中文网"
+    feed_url: "https://www.ftchinese.com/rss/feed"
+    default_category: global
+    max_items: 20
+    layer: L3
+    base_weight: 0.80
+    compliance_level: MEDIUM
+    domain_tags: [global, china, macro]
+
+  rss_nikkei_asia:
+    type: rss
+    enabled: true
+    display_name: "Nikkei Asia"
+    feed_url: "https://asia.nikkei.com/rss/feed/nar"
+    default_category: global
+    max_items: 20
+    layer: L3
+    base_weight: 0.75
+    compliance_level: MEDIUM
+    domain_tags: [asia, japan, equities]
+
+  rss_bbc_business:
+    type: rss
+    enabled: true
+    display_name: "BBC Business"
+    feed_url: "https://feeds.bbci.co.uk/news/business/rss.xml"
+    default_category: global
+    max_items: 15
+    layer: L3
+    base_weight: 0.75
+    compliance_level: MEDIUM
+    domain_tags: [global, macro, equities]
+
+  rss_guardian_business:
+    type: rss
+    enabled: true
+    display_name: "Guardian Business"
+    feed_url: "https://www.theguardian.com/uk/business/rss"
+    default_category: global
+    max_items: 15
+    layer: L3
+    base_weight: 0.70
+    compliance_level: MEDIUM
+    domain_tags: [global, europe, macro]
+
+  rss_foreign_affairs:
+    type: rss
+    enabled: true
+    display_name: "Foreign Affairs"
+    feed_url: "https://www.foreignaffairs.com/rss.xml"
+    default_category: global
+    max_items: 10
+    layer: L3
+    base_weight: 0.75
+    compliance_level: MEDIUM
+    domain_tags: [global, geopolitics, macro]
+
+  rss_mit_tech_review:
+    type: rss
+    enabled: true
+    display_name: "MIT Tech Review"
+    feed_url: "https://www.technologyreview.com/feed/"
+    default_category: industry
+    max_items: 10
+    layer: L3
+    base_weight: 0.70
+    compliance_level: MEDIUM
+    domain_tags: [global, technology, industry]
+
+  rss_ars_technica:
+    type: rss
+    enabled: true
+    display_name: "Ars Technica"
+    feed_url: "https://feeds.arstechnica.com/arstechnica/index"
+    default_category: industry
+    max_items: 15
+    layer: L3
+    base_weight: 0.65
+    compliance_level: MEDIUM
+    domain_tags: [global, technology, industry]
+
+  # ── L4: Aggregators & Financial Media ──────────────────────────────
+  akshare_news:
+    type: akshare_news
+    enabled: true
+    display_name: "东方财富新闻"
+    default_category: market
+    max_items: 30
+    layer: L4
+    base_weight: 0.60
+    compliance_level: LOW
+    domain_tags: [china, equities, market]
+
+  rss_36kr:
+    type: rss
+    enabled: true
+    display_name: "36氪"
+    feed_url: "https://36kr.com/feed"
+    default_category: industry
+    max_items: 20
+    layer: L4
+    base_weight: 0.55
+    compliance_level: LOW
+    domain_tags: [china, technology, industry]
+
+  rss_huxiu:
+    type: rss
+    enabled: true
+    display_name: "虎嗅"
+    feed_url: "https://www.huxiu.com/rss/0.xml"
+    default_category: industry
+    max_items: 15
+    layer: L4
+    base_weight: 0.55
+    compliance_level: LOW
+    domain_tags: [china, technology, industry]
+
+  rss_cnbc_markets:
+    type: rss
+    enabled: true
+    display_name: "CNBC Markets"
+    feed_url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100727362"
+    default_category: global
+    max_items: 20
+    layer: L4
+    base_weight: 0.60
+    compliance_level: LOW
+    domain_tags: [us, equities, macro]
+
+  rss_yahoo_finance:
+    type: rss
+    enabled: true
+    display_name: "Yahoo Finance"
+    feed_url: "https://finance.yahoo.com/news/rssindex"
+    default_category: global
+    max_items: 20
+    layer: L4
+    base_weight: 0.55
+    compliance_level: LOW
+    domain_tags: [us, equities, macro]
+
+  rss_csis:
+    type: rss
+    enabled: true
+    display_name: "CSIS Analysis"
+    feed_url: "https://www.csis.org/analysis/feed"
+    default_category: global
+    max_items: 10
+    layer: L3
+    base_weight: 0.70
+    compliance_level: MEDIUM
+    domain_tags: [global, geopolitics, macro]
+
+  rss_espn:
+    type: rss
+    enabled: false
+    display_name: "ESPN"
+    feed_url: "https://www.espn.com/espn/rss/news"
+    default_category: community
+    max_items: 10
+    layer: L4
+    base_weight: 0.40
+    compliance_level: LOW
+    domain_tags: [global, sports]
+
+  # ── L5: Social / Community ─────────────────────────────────────────
+  reddit_finance:
+    type: reddit
+    enabled: false  # Reddit blocks requests with 403; each subreddit wastes 15s timeout
+    display_name: "Reddit Finance"
+    default_category: social
+    subreddits: [wallstreetbets, stocks, investing, economics]
+    max_items_per_sub: 10
+    request_delay_seconds: 1.5
+    layer: L5
+    base_weight: 0.35
+    compliance_level: LOW
+    domain_tags: [us, social, equities]
+
+  reddit_china:
+    type: reddit
+    enabled: false  # Reddit blocks requests with 403; each subreddit wastes 15s timeout
+    display_name: "Reddit Asia"
+    default_category: community
+    subreddits: [ChinaStocks, AusFinance]
+    max_items_per_sub: 10
+    request_delay_seconds: 1.5
+    layer: L5
+    base_weight: 0.30
+    compliance_level: LOW
+    domain_tags: [asia, social, equities]
+
+  # ── Placeholders (Phase 2 adapter types) ───────────────────────────
+  # bloomberg_rss_catalog:
+  #   type: rss_catalog
+  #   enabled: false
+  #   display_name: "Bloomberg"
+  #   layer: L1
+  #   base_weight: 0.95
+  # twitter_finance:
+  #   type: x
+  #   enabled: false
+  #   display_name: "Twitter/X Finance"
+  #   layer: L5
+  #   base_weight: 0.35
+
+# ── Classification ───────────────────────────────────────────────────
+classification:
+  category_rules:
+    # Source-type overrides
+    - match_source_type: policy
+      category: policy
+    - match_source_type: reddit
+      category: social
+
+    # Chinese keywords
+    - match_keywords: ["降准","降息","LPR","MLF","货币政策","CPI","GDP","PMI"]
+      category: macro
+    - match_keywords: ["板块","行业","产业链","赛道","概念"]
+      category: industry
+    - match_keywords: ["公告","业绩","增持","减持","分红","回购"]
+      category: company
+    - match_keywords: ["美股","纳斯达克","港股","恒指","日经","原油","黄金"]
+      category: global
+
+    # English keywords
+    - match_keywords: ["interest rate","rate hike","rate cut","inflation","Federal Reserve","Fed","ECB","Bank of Japan","BOJ","monetary policy","fiscal policy","treasury yield"]
+      category: macro
+    - match_keywords: ["S&P 500","Nasdaq","Dow Jones","FTSE","Nikkei","Hang Seng","crude oil","gold price","Wall Street","forex"]
+      category: global
+    - match_keywords: ["semiconductor","EV","electric vehicle","renewable energy","AI chip","supply chain","sector rotation"]
+      category: industry
+    - match_keywords: ["earnings","revenue","buyback","dividend","IPO","merger","acquisition","SEC filing"]
+      category: company
+
+  priority_rules:
+    # Chinese keywords
+    - match_keywords: ["紧急","突发","重大","暴跌","暴涨","熔断","停牌"]
+      priority: breaking
+    - match_keywords: ["降准","降息","IPO","注册制","印花税"]
+      priority: high
+    - match_source_type: policy
+      priority: high
+
+    # English keywords
+    - match_keywords: ["breaking","flash crash","circuit breaker","emergency","plunge","surge","halt"]
+      priority: breaking
+    - match_keywords: ["rate cut","rate hike","FOMC","earnings beat","earnings miss"]
+      priority: high
+
+# ── Scoring Configuration (v23.0) ────────────────────────────────────
+scoring:
+  weights:
+    source_weight: 45
+    timeliness: 20
+    cross_verification: 15
+    domain_relevance: 10
+    quality_signals: 10
+    noise_penalty: 20
+
+  timeliness_buckets:
+    # hours -> decay factor
+    - { max_hours: 1, factor: 1.0 }
+    - { max_hours: 6, factor: 0.8 }
+    - { max_hours: 24, factor: 0.5 }
+    - { max_hours: 72, factor: 0.2 }
+    - { max_hours: 999999, factor: 0.05 }
+
+  quality_bonuses:
+    has_summary: 0.4
+    has_url: 0.3
+    has_symbols: 0.3
+
+  noise_thresholds:
+    min_title_length: 10
+    social_min_score: 5
+
+# ── Health Tracking ──────────────────────────────────────────────────
+health:
+  warn_after_failures: 3
+  down_after_failures: 8
+
+# ── Anti-Filter-Bubble (Phase 2) ─────────────────────────────────────
+anti_filter_bubble:
+  enabled: true
+  diversity_strength: medium  # low | medium | high
+  min_non_interest_pct: 0.30
+  layer_budgets:
+    L1: 0.35
+    L2: 0.15
+    L3: 0.25
+    L4: 0.15
+    L5: 0.10

@@ -1,0 +1,54 @@
+data_collection:
+  daily:
+    enabled: true
+    start_date: '20240101'
+    end_date: ''
+    adjust: qfq
+  fundamental:
+    enabled: true
+    metrics:
+    - pe_ttm
+    - pb
+    - total_mv
+    - revenue
+    - net_profit
+  market:
+    enabled: true
+    indices:
+    - '000001'
+    - '399001'
+    - '399006'
+    northbound: true
+    margin: true
+cache:
+  enabled: true
+  directory: data/raw
+  format: parquet
+  ttl_hours: 12
+  naming: '{symbol}_{datatype}_{date}.parquet'
+request:
+  interval_seconds: 0.5
+  max_retries: 3
+  retry_delay_seconds: 2
+  timeout_seconds: 30
+data_sources:
+  proxy_blocked_domains: []  # Empty — akshare-proxy-patch handles push2 routing
+  preferred_realtime: eastmoney  # Prefer EastMoney now that proxy patch is active
+  realtime_cache_ttl_seconds: 5
+  fallback_enabled: true
+  adata_enabled: true
+  # EastMoney push2 access: curl_cffi client with Chrome TLS impersonation
+  # Mode: auto (try direct, fallback to gateway) | direct | gateway
+  # Gateway is used in VPN-blocked environments (isolated URL rewrite, no monkey-patch)
+  # Optional: set the host/IP of your own self-hosted akshare auth proxy here.
+  # Leave empty for direct access only. Never commit a real gateway/token to a public repo.
+  eastmoney_proxy:
+    enabled: true
+    gateway: ""
+    mode: "auto"
+    timeout: 15
+    max_workers: 8
+    # Auth token read from env var AKSHARE_PROXY_TOKEN (set in .env)
+  qmt:
+    enabled: false
+    mini_qmt_path: ''  # Path to QMT mini terminal, e.g. 'C:/国金QMT/userdata_mini'

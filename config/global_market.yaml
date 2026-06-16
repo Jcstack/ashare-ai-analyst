@@ -1,0 +1,109 @@
+# Global market data configuration
+# Per PRD v3.2 FR-GM001 + v34.0 FR-GI001: Expanded global market coverage
+
+indices:
+  - symbol: "^GSPC"
+    name: "标普500"
+    region: "美洲"
+  - symbol: "^DJI"
+    name: "道琼斯"
+    region: "美洲"
+  - symbol: "^IXIC"
+    name: "纳斯达克"
+    region: "美洲"
+  - symbol: "^N225"
+    name: "日经225"
+    region: "亚太"
+  - symbol: "^HSI"
+    name: "恒生指数"
+    region: "亚太"
+  - symbol: "^FTSE"
+    name: "富时100"
+    region: "欧洲"
+  - symbol: "^GDAXI"
+    name: "德国DAX"
+    region: "欧洲"
+  - symbol: "000001.SS"
+    name: "上证综指"
+    region: "中国"
+  - symbol: "399001.SZ"
+    name: "深证成指"
+    region: "中国"
+
+commodities:
+  - symbol: "GC=F"
+    name: "黄金"
+    unit: "USD/oz"
+    tags: ["safe_haven", "precious_metal"]
+  - symbol: "SI=F"
+    name: "白银"
+    unit: "USD/oz"
+    tags: ["precious_metal"]
+  - symbol: "CL=F"
+    name: "原油(WTI)"
+    unit: "USD/bbl"
+    tags: ["energy"]
+  - symbol: "BZ=F"
+    name: "布伦特原油"
+    unit: "USD/bbl"
+    tags: ["energy"]
+  - symbol: "HG=F"
+    name: "铜"
+    unit: "USD/lb"
+    tags: ["industrial_metal"]
+  - symbol: "NG=F"
+    name: "天然气"
+    unit: "USD/MMBtu"
+    tags: ["energy"]
+  - symbol: "ALI=F"
+    name: "铝"
+    unit: "USD/lb"
+    tags: ["industrial_metal"]
+
+# Volatility indices
+volatility:
+  - symbol: "^VIX"
+    name: "恐慌指数(VIX)"
+
+# Currency pairs — expanded for macro analysis
+currencies:
+  - symbol: "CNY=X"
+    name: "美元/人民币"
+    tags: ["rmb"]
+  - symbol: "EURCNY=X"
+    name: "欧元/人民币"
+  - symbol: "DX-Y.NYB"
+    name: "美元指数(DXY)"
+    tags: ["usd_index"]
+  - symbol: "JPY=X"
+    name: "美元/日元"
+  - symbol: "GBPUSD=X"
+    name: "英镑/美元"
+
+# Bond yields (fetched via fetch_bond_yields)
+bonds:
+  - symbol: "^TNX"
+    name: "美国10年期国债收益率"
+    tags: ["us_treasury"]
+  - symbol: "^IRX"
+    name: "美国13周国债收益率"
+    tags: ["us_treasury"]
+  - symbol: "^TYX"
+    name: "美国30年期国债收益率"
+    tags: ["us_treasury"]
+
+# Supply chain / shipping indicators
+supply_chain:
+  - symbol: "BDIY"
+    name: "波罗的海干散货指数(BDI)"
+    source: "akshare"  # not available on yfinance
+    tags: ["shipping"]
+  - symbol: "^SOX"
+    name: "费城半导体指数"
+    tags: ["semiconductor"]
+
+# Cache TTL in seconds (5 minutes)
+cache_ttl: 300
+
+# Rate limit: minimum interval between yfinance calls (seconds)
+rate_limit_interval: 2.0

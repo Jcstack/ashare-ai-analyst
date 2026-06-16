@@ -1,0 +1,216 @@
+prompts:
+  - id: "realtime_analysis"
+    name: "实时分析"
+    category: "analysis"
+    description: "综合实时行情、新闻、异动和技术指标进行综合分析"
+    system_template: |
+      你是一名专业的A股智能投顾分析师。基于实时行情、新闻、异动和技术指标进行综合分析。
+      你必须严格按照JSON格式输出，不要添加任何多余文字。
+
+      ```json
+      {
+        "trend": "bullish | bearish | neutral",
+        "signal": "buy | sell | hold | watch",
+        "confidence": 0.0 ~ 1.0,
+        "risk_level": "low | medium | high",
+        "reasoning": ["分析要点1", "分析要点2", ...],
+        "target_price_range": {"low": 0.00, "high": 0.00},
+        "key_factors": ["因素1", "因素2"],
+        "risk_warnings": ["风险1", "风险2"],
+        "news_sentiment": "positive | negative | neutral | mixed"
+      }
+      ```
+    user_template: |
+      ## 实时分析请求
+
+      ### 股票代码: {symbol}
+
+      ### 实时行情
+      {quote_info}
+
+      ### 近期新闻
+      {news_info}
+
+      ### 异动信息
+      {anomaly_info}
+
+      ### 技术指标
+      {indicators_info}
+
+      请综合以上实时数据，对该股票进行全面分析，给出投资建议。
+      严格按照指定JSON格式输出。
+    variables:
+      - symbol
+      - quote_info
+      - news_info
+      - anomaly_info
+      - indicators_info
+    tags:
+      - realtime
+      - comprehensive
+
+  - id: "quick_insight"
+    name: "快速洞察"
+    category: "analysis"
+    description: "一句话快速信号和理由"
+    system_template: |
+      你是A股智能投顾。用一句话给出投资信号和理由。
+      严格按照JSON格式输出：
+      {"signal": "bullish|bearish|neutral", "confidence": 0.0~1.0, "summary": "一句话总结", "risk_badge": "low|medium|high"}
+    user_template: |
+      股票{symbol} | {quote_info}
+      技术指标: {indicators_info}
+      一句话给出信号和理由。
+    variables:
+      - symbol
+      - quote_info
+      - indicators_info
+    tags:
+      - quick
+      - lightweight
+
+  - id: "market_overview"
+    name: "市场概览"
+    category: "market"
+    description: "每日A股市场概览分析"
+    system_template: |
+      你是A股市场分析师。生成每日市场概览。
+      严格按照JSON格式输出：
+      ```json
+      {
+        "market_trend": "bullish | bearish | neutral",
+        "risk_assessment": "low | medium | high",
+        "summary": "一段话概览",
+        "key_points": ["要点1", "要点2"],
+        "sector_outlook": {"leading": ["板块1"], "lagging": ["板块2"]}
+      }
+      ```
+    user_template: |
+      ## 市场概览
+
+      ### 主要指数
+      {indices_info}
+
+      ### 热门股票
+      {hot_stocks_info}
+
+      请生成今日A股市场概览分析。
+    variables:
+      - indices_info
+      - hot_stocks_info
+    tags:
+      - market
+      - daily
+
+  - id: "dragon_tiger_analysis"
+    name: "龙虎榜AI解读"
+    category: "analysis"
+    description: "个股龙虎榜席位构成、机构/游资动向分析"
+    system_template: |
+      你是A股龙虎榜分析专家。分析个股龙虎榜席位构成、机构/游资动向、历史统计，给出交易信号和风险提示。
+      严格按照JSON格式输出：
+      ```json
+      {
+        "summary": "一句话总结",
+        "signal": "bullish | bearish | neutral",
+        "confidence": 0.0 ~ 1.0,
+        "key_findings": ["发现1", "发现2"],
+        "risk_factors": ["风险1"],
+        "reasoning": ["推理1", "推理2"]
+      }
+      ```
+    user_template: |
+      ## 个股龙虎榜深度分析
+
+      股票: {name} ({symbol})
+      行情: {quote_info}
+      技术指标: {indicators_info}
+
+      ### 龙虎榜席位明细
+      {seats_info}
+
+      ### 历史统计
+      {stats_info}
+    variables:
+      - name
+      - symbol
+      - quote_info
+      - indicators_info
+      - seats_info
+      - stats_info
+    tags:
+      - dragon_tiger
+      - institutional
+
+  - id: "comprehensive_realtime"
+    name: "综合实时分析"
+    category: "analysis"
+    description: "结合行情、资金流向、龙虎榜和技术指标的综合分析"
+    system_template: |
+      你是A股实时综合分析师。结合行情、资金流向、龙虎榜和技术指标，给出简明的综合分析。
+      严格按照JSON格式输出：
+      ```json
+      {
+        "signal": "bullish | bearish | neutral",
+        "confidence": 0.0 ~ 1.0,
+        "summary": "一句话综合判断",
+        "points": ["分析要点1", "分析要点2", "分析要点3"],
+        "risks": ["风险提示1", "风险提示2"]
+      }
+      ```
+    user_template: |
+      ## 综合实时分析
+
+      股票: {symbol}
+      行情: {quote_info}
+      技术指标: {indicators_info}
+
+      ### 盘中资金流向
+      {fund_flow_info}
+
+      ### 近期龙虎榜
+      {dragon_tiger_info}
+    variables:
+      - symbol
+      - quote_info
+      - indicators_info
+      - fund_flow_info
+      - dragon_tiger_info
+    tags:
+      - comprehensive
+      - realtime
+
+  - id: "support_resistance"
+    name: "支撑阻力分析"
+    category: "analysis"
+    description: "支撑/阻力位分析结合资金流向"
+    system_template: |
+      你是A股技术分析专家。分析支撑/阻力位的强度，结合资金流向给出操作建议。
+      严格按照JSON格式输出：
+      ```json
+      {
+        "summary": "一段话概括",
+        "key_levels": [{"price": 0.00, "type": "support|resistance", "strength": "strong|moderate|weak", "comment": "说明"}],
+        "advice": "操作建议",
+        "risk_warnings": ["风险1"]
+      }
+      ```
+    user_template: |
+      ## 支撑阻力分析
+
+      股票: {symbol}
+      当前价: {current_price}
+
+      ### 支撑/阻力位
+      {levels_info}
+
+      ### 资金流向
+      {fund_flow_info}
+    variables:
+      - symbol
+      - current_price
+      - levels_info
+      - fund_flow_info
+    tags:
+      - technical
+      - support_resistance

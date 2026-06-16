@@ -1,0 +1,95 @@
+# Phase-aware signal rules for the 8-phase A-share trading model.
+# Used by PhaseEngine (src/market_intelligence/phase_engine.py).
+#
+# Each phase defines:
+#   allowed_signal_types  - SignalType values permitted during this phase
+#   max_push_count        - maximum push notifications per phase window
+#   urgency_boost         - whether signals are auto-boosted to URGENT
+#   digest_mode           - whether signals are batched into a digest
+
+phases:
+  PRE_OPEN:
+    allowed_signal_types:
+      - SYSTEM_ALERT
+      - S8_MACRO_DRIVEN
+    max_push_count: 5
+    urgency_boost: false
+    digest_mode: true
+
+  CALL_AUCTION:
+    allowed_signal_types:
+      - S4_ANOMALY
+      - S5_VOLATILITY
+      - STOCK_ALERT
+    max_push_count: 10
+    urgency_boost: true
+    digest_mode: false
+
+  MORNING:
+    allowed_signal_types:
+      - S1_TREND
+      - S2_MOMENTUM_SHIFT
+      - S3_SENTIMENT
+      - S4_ANOMALY
+      - S5_VOLATILITY
+      - S6_CORRELATION_SHIFT
+      - S7_POLICY_DRIVEN
+      - S8_MACRO_DRIVEN
+      - S9_REGIME_CHANGE
+      - STOCK_ALERT
+      - SYSTEM_ALERT
+    max_push_count: 20
+    urgency_boost: false
+    digest_mode: false
+
+  MIDDAY_BREAK:
+    allowed_signal_types:
+      - S3_SENTIMENT
+      - S7_POLICY_DRIVEN
+      - SYSTEM_ALERT
+    max_push_count: 5
+    urgency_boost: false
+    digest_mode: true
+
+  AFTERNOON:
+    allowed_signal_types:
+      - S1_TREND
+      - S2_MOMENTUM_SHIFT
+      - S3_SENTIMENT
+      - S4_ANOMALY
+      - S5_VOLATILITY
+      - S6_CORRELATION_SHIFT
+      - S7_POLICY_DRIVEN
+      - S8_MACRO_DRIVEN
+      - S9_REGIME_CHANGE
+      - STOCK_ALERT
+      - SYSTEM_ALERT
+    max_push_count: 20
+    urgency_boost: false
+    digest_mode: false
+
+  CLOSING_AUCTION:
+    allowed_signal_types:
+      - S4_ANOMALY
+      - S5_VOLATILITY
+      - STOCK_ALERT
+    max_push_count: 10
+    urgency_boost: true
+    digest_mode: false
+
+  POST_CLOSE:
+    allowed_signal_types:
+      - S3_SENTIMENT
+      - S7_POLICY_DRIVEN
+      - S8_MACRO_DRIVEN
+      - SYSTEM_ALERT
+    max_push_count: 10
+    urgency_boost: false
+    digest_mode: true
+
+  CLOSED:
+    allowed_signal_types:
+      - SYSTEM_ALERT
+    max_push_count: 3
+    urgency_boost: false
+    digest_mode: true

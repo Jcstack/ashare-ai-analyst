@@ -1,0 +1,66 @@
+# Data collection (数据采集)
+akshare>=1.12.0
+akshare-proxy-patch>=0.2.7
+curl-cffi>=0.13.0
+adata>=2.9.0
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=14.0.0
+
+# AI Core (多模型分析预测)
+anthropic>=0.40.0
+openai>=1.40.0
+google-genai>=1.0.0
+
+# Encryption (密钥加密存储)
+cryptography>=42.0.0
+
+# Technical analysis (技术分析)
+ta>=0.11.0
+
+# Visualization (可视化)
+matplotlib>=3.7.0
+plotly>=5.15.0
+
+# Backtesting (策略回测)
+backtrader>=1.9.78
+
+# Task queue (任务调度)
+celery[redis]>=5.3.0
+redis>=5.0.0
+
+# Notification (通知)
+requests>=2.31.0
+
+# Global market data (全球行情)
+yfinance>=0.2.36
+
+# RSS parsing (情报中心)
+feedparser>=6.0.0
+
+# Web search (联网搜索)
+ddgs>=7.0.0
+
+# Configuration (配置管理)
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Web API (FastAPI + React SPA)
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+gunicorn>=22.0.0
+python-multipart>=0.0.6
+sse-starlette>=1.8.2
+aiofiles>=23.2.1
+
+# Discord bot (移动指挥中心)
+discord.py>=2.3.0
+
+# Quantitative prediction (量化预测, optional)
+# qlib>=0.9.0  # Optional: pip install qlib (heavy deps, not in Docker)
+
+# Dev tools
+ruff>=0.4.0
+pytest>=8.0.0
+pytest-benchmark>=4.0
+httpx>=0.27.0

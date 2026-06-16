@@ -1,0 +1,17 @@
+from openclaw.tasks import daily_pipeline  # noqa: F401
+from openclaw.tasks import sentiment_pipeline  # noqa: F401
+from openclaw.tasks import backfill_pipeline  # noqa: F401
+from openclaw.tasks import signal_scan  # noqa: F401
+from openclaw.tasks import global_market_pipeline  # noqa: F401
+from openclaw.tasks import evaluation_report  # noqa: F401
+from openclaw.tasks import intel_refresh_pipeline  # noqa: F401
+from openclaw.tasks import intel_analysis_pipeline  # noqa: F401
+from openclaw.tasks import capital_flow_pipeline  # noqa: F401
+from openclaw.tasks import market_status_pipeline  # noqa: F401
+from openclaw.tasks import recommendation_pipeline  # noqa: F401
+from openclaw.tasks import recommendation_backfill  # noqa: F401
+from openclaw.tasks import recommendation_cleanup  # noqa: F401
+from openclaw.tasks import llm_prewarm_pipeline  # noqa: F401
+from openclaw.tasks import qlib_update_pipeline  # noqa: F401
+from openclaw.tasks import proxy_health_pipeline  # noqa: F401
+from openclaw.tasks import intelligence_pipeline  # noqa: F401

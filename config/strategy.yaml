@@ -1,0 +1,37 @@
+# 策略配置 (Strategy Config)
+
+common:
+  initial_capital: 1000000  # 初始资金 100万
+  position_size: 0.3        # 单只股票最大仓位 30%
+  max_positions: 3          # 最大持仓数量
+  stop_loss: 0.08           # 止损 8%
+  take_profit: 0.15         # 止盈 15%
+
+  # A股交易规则
+  commission_rate: 0.0003   # 佣金 0.03%
+  min_commission: 5.0       # 最低佣金 5元
+  stamp_tax_rate: 0.001     # 印花税 0.1% (仅卖出)
+  min_lot_size: 100         # 最小交易单位 100股
+
+trend_following:
+  fast_ma: 5
+  slow_ma: 20
+  macd_confirm: true
+  volume_filter: true
+  volume_ma_period: 20
+  volume_threshold: 1.5   # volume > 1.5x average
+
+mean_reversion:
+  bb_period: 20
+  bb_std: 2.0
+  rsi_period: 14
+  rsi_oversold: 30
+  rsi_overbought: 70
+  volume_confirm: true
+
+momentum:
+  roc_period: 12          # Rate of Change lookback
+  rsi_period: 14
+  rsi_threshold: 50       # RSI above 50 = bullish momentum
+  volume_surge_threshold: 2.0  # volume > 2x average
+  lookback: 20

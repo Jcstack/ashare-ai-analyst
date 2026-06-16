@@ -1,0 +1,53 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.venv/
+.venv-qlib/
+venv/
+env/
+*.env
+.idea/
+.vscode/
+*.swp
+*.swo
+/data/
+/reports/
+scripts/output/reports/*.json
+scripts/output/reports/*.md
+!scripts/output/reports/.gitkeep
+scripts/output/logs/*
+!scripts/output/logs/.gitkeep
+.ipynb_checkpoints/
+reports/*.html
+reports/*.pdf
+/workspace/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+logs/
+
+# Secrets & local env (never commit real values — use .env.example as the template)
+.env
+*.env
+!.env.example
+
+# Local AI-assistant / agent state (personal, machine-specific)
+.claude/
+.mcp.json
+
+# Editor/refactor backups & junk
+*.bak
+*.orig
+*.tmp
+*~
+
+# Runtime databases & data artifacts (created at runtime, never committed)
+*.db
+*.sqlite
+*.sqlite3
+frontend/data/

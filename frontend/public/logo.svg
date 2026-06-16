@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#C4B5FD"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <!-- Trend line (upward) -->
+  <polyline
+    points="96,384 176,320 240,340 304,240 368,180 432,128"
+    stroke="url(#line)"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+  <!-- Data points -->
+  <circle cx="96" cy="384" r="12" fill="#C4B5FD"/>
+  <circle cx="176" cy="320" r="12" fill="#C4B5FD"/>
+  <circle cx="240" cy="340" r="12" fill="#C4B5FD"/>
+  <circle cx="304" cy="240" r="12" fill="#C4B5FD"/>
+  <circle cx="368" cy="180" r="12" fill="#C4B5FD"/>
+  <circle cx="432" cy="128" r="14" fill="#FFFFFF"/>
+  <!-- Sparkle at peak -->
+  <path d="M432 96 l4-16 l4 16 l16 4 l-16 4 l-4 16 l-4-16 l-16-4 z" fill="#FFFFFF" opacity="0.8"/>
+</svg>

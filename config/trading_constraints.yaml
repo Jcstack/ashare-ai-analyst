@@ -1,0 +1,23 @@
+# Trading Constraints Configuration
+# Per PRD v34.0 FR-PA004: Full-pipeline constraint enforcement
+
+# Exchange / board permissions
+allowed_boards:
+  - "main"  # 沪深主板 only
+# Blocked: chinext (创业板 300/301), star (科创板 688/689), bse (北交所 8xxxxx)
+
+# T+1 settlement
+t_plus_1: true
+overnight_risk_mandatory: true
+
+# Ultra-short-term constraints
+max_hold_days: 3              # Warn if held > 3 days
+max_single_position_pct: 30.0 # Max 30% per stock
+max_intraday_chase_pct: 5.0   # Don't chase if already up > 5% today
+min_daily_turnover_wan: 5000  # Min avg daily turnover (万元)
+
+# Lot size and costs
+lot_size: 100                 # A-share minimum trading unit
+commission_rate: 0.0003       # 万三
+stamp_duty_rate: 0.001        # 千一 (sell-side only)
+min_commission: 5.0           # Min commission 5 CNY

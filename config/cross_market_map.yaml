@@ -1,0 +1,38 @@
+# Cross-market mapping: A-share stocks → global peers, commodities, sector tags.
+# Used by TradingAdvisor for cross-market correlation context.
+
+mappings:
+  "001330":
+    us_peers: ["IMAX", "DIS"]
+    hk_peers: []
+    commodities: []
+    tags: ["entertainment"]
+  "601919":
+    us_peers: ["ZIM", "MATX"]
+    hk_peers: ["1919.HK"]
+    commodities: ["BDI"]
+    tags: ["shipping"]
+  "600519":
+    us_peers: []
+    hk_peers: []
+    commodities: []
+    tags: ["liquor"]
+  "300750":
+    us_peers: ["TSLA", "CATL"]
+    hk_peers: []
+    commodities: ["LIT"]
+    tags: ["new_energy"]
+  "002594":
+    us_peers: ["TSLA", "NIO"]
+    hk_peers: ["1211.HK"]
+    commodities: ["LIT"]
+    tags: ["new_energy", "auto"]
+
+default_sector_peers:
+  entertainment: ["DIS", "NFLX", "IMAX"]
+  semiconductor: ["NVDA", "TSM", "ASML"]
+  new_energy: ["TSLA", "ENPH", "FSLR"]
+  liquor: ["DEO", "BF-B"]
+  ai_tech: ["NVDA", "MSFT", "GOOG"]
+  medical: ["PFE", "JNJ", "AMGN"]
+  shipping: ["ZIM", "MATX", "DAC"]

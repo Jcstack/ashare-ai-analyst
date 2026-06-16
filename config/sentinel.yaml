@@ -1,0 +1,58 @@
+data_sources:
+  global_markets:
+    enabled: true
+    provider: yfinance
+  news_platforms:
+    enabled: true
+    platforms:
+    - eastmoney
+    - cls
+    - toutiao
+    - weibo
+    - baidu
+    refresh_interval: 1800
+  rss_feeds:
+    enabled: true
+    feeds:
+    - url: https://rsshub.app/caixin/latest
+      name: 财新网
+      category: policy
+    - url: https://rsshub.app/wallstreetcn/news/global
+      name: 华尔街见闻
+      category: global
+    max_age_days: 3
+notifications:
+  channels:
+  - type: wecom
+    enabled: false
+    webhook_url: ${WECOM_WEBHOOK_URL}
+    events:
+    - reopen_briefing
+    - holiday_impact
+    - risk_alert
+  - type: dingtalk
+    enabled: false
+    webhook_url: ${DINGTALK_WEBHOOK_URL}
+    secret: ${DINGTALK_SECRET}
+    events:
+    - all
+  - type: telegram
+    enabled: false
+    bot_token: ${TELEGRAM_BOT_TOKEN}
+    chat_id: ${TELEGRAM_CHAT_ID}
+    events:
+    - all
+  - type: webhook
+    enabled: false
+    url: ''
+    method: POST
+    headers: {}
+    events:
+    - all
+  event_types:
+  - reopen_briefing
+  - holiday_impact
+  - risk_alert
+  - sentiment_update
+  - advisor_signal
+  - market_overview

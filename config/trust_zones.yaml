@@ -1,0 +1,56 @@
+# Trust Zone Configuration — v14.0 Institutional Contracts
+#
+# Defines how trust zones are computed from confidence, data quality,
+# and validation pass rate.
+#
+# Trust zones: HIGH > MEDIUM > LOW > UNTRUSTED
+# Each zone has minimum thresholds for composite score.
+
+trust_zones:
+  # Composite score = w_confidence * confidence + w_data_quality * (dq/100) + w_validation * pass_rate
+  weights:
+    confidence: 0.4
+    data_quality: 0.3
+    validation: 0.3
+
+  # Composite score thresholds for each zone
+  thresholds:
+    HIGH: 0.75        # >= 0.75: All signals strong, data fresh, validations pass
+    MEDIUM: 0.50      # >= 0.50: Most data available, some uncertainty
+    LOW: 0.25         # >= 0.25: Significant data gaps or low confidence
+    UNTRUSTED: 0.0    # < 0.25: Critical data missing or validations failing
+
+  # Per-zone behavior rules
+  zone_policies:
+    HIGH:
+      allow_trade_decisions: true
+      max_position_pct: 70     # aggressive users can use full allocation
+      require_user_confirmation: false
+      display_warnings: false
+
+    MEDIUM:
+      allow_trade_decisions: true
+      max_position_pct: 50     # moderate cap
+      require_user_confirmation: false
+      display_warnings: true   # show data gap warnings in UI
+
+    LOW:
+      allow_trade_decisions: true
+      max_position_pct: 30     # conservative cap
+      require_user_confirmation: true   # require explicit user click
+      display_warnings: true
+
+    UNTRUSTED:
+      allow_trade_decisions: false  # no trade cards emitted
+      max_position_pct: 0
+      require_user_confirmation: true
+      display_warnings: true
+
+# Data source freshness thresholds (seconds)
+# Used to detect stale data and degrade trust zone
+data_freshness:
+  realtime_quote: 30       # quotes older than 30s are stale
+  technical_indicators: 300  # indicators older than 5min
+  news: 3600               # news older than 1 hour
+  concept_board: 600       # concept data older than 10min
+  global_market: 120       # global data older than 2min

@@ -1,0 +1,37 @@
+# AI Agent Configuration (智能投顾配置)
+# Per PRD v2.0 FR-AI001~AI003, FR-AD001~AD002
+
+agent:
+  name: "Claude 智能投顾"
+  version: "2.0.0"
+
+realtime:
+  source_priority: ["sina", "xueqiu"]
+  polling_interval_seconds: 10
+  cache_ttl_seconds: 5
+  batch_size: 50  # Max symbols per Sina batch call
+  rate_limit_per_second: 2  # Token bucket rate limit for Sina
+
+news:
+  max_items_per_stock: 20
+  sentiment_model: "claude-sonnet-4-6"
+  cache_ttl_seconds: 300
+  hot_rank_limit: 50
+
+anomaly:
+  volume_spike_threshold: 2.0
+  price_limit_proximity: 0.02
+  rsi_overbought: 80
+  rsi_oversold: 20
+  ma_cross_periods: [5, 20]
+  bollinger_period: 20
+  bollinger_std: 2.0
+
+ai_analysis:
+  quick_model: "claude-sonnet-4-6"
+  deep_model: "claude-sonnet-4-6"
+  quick_cache_ttl_seconds: 300
+  deep_cache_ttl_seconds: 1800
+  max_tokens_quick: 2048
+  max_tokens_deep: 16384
+  temperature: 0.3

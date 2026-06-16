@@ -1,0 +1,385 @@
+# Predefined orchestration pipelines — agent-spec-compliance Phase 1
+#
+# Each pipeline is a DAG of steps.  The executor resolves execution
+# order from depends_on and runs independent steps in parallel.
+#
+# Step fields:
+#   agent         — agent name from config/agents.yaml
+#   task          — description template ({symbol} substituted at runtime)
+#   depends_on    — list of step IDs that must complete first
+#   input_filter  — context fields this step receives (isolation)
+#   output_fields — fields extracted from result into shared output
+#   required      — pipeline fails if this step fails
+#   timeout_ms    — per-step timeout (default 30000)
+
+pipelines:
+
+  # ──────────────────────────────────────────────────────────
+  # 个股综合分析
+  # ──────────────────────────────────────────────────────────
+  stock_analysis:
+    description: "个股综合分析 — 技术面、舆情、regime、回测、风控"
+    budget_tokens: 50000
+    max_duration_ms: 120000
+    require_all_outputs:
+      - data_quality_score
+      - data_gaps
+      - confidence_score
+      - key_assumptions
+      - failure_modes
+      - risk_level
+
+    steps:
+      data_qa:
+        agent: data_qa
+        task: "检查 {symbol} 数据质量与新鲜度"
+        depends_on: []
+        input_filter: [symbol]
+        output_fields: [data_quality_score, data_gaps, is_sufficient]
+        required: true
+        timeout_ms: 10000
+
+      technical:
+        agent: analyst
+        task: "技术面分析 {symbol}：指标、形态、概念联动"
+        depends_on: [data_qa]
+        input_filter: [symbol, quote, indicators, data_quality_score]
+        output_fields: [signal, dimensions, confidence_score, key_assumptions, failure_modes]
+        required: true
+
+      sentiment:
+        agent: sentiment
+        task: "舆情与市场情绪分析 {symbol}"
+        depends_on: [data_qa]
+        input_filter: [symbol, news_items]
+        output_fields: [sentiment_score, sentiment_signal, key_events]
+        required: false
+
+      regime:
+        agent: regime
+        task: "判断当前市场 regime 与宏观环境"
+        depends_on: [data_qa]
+        input_filter: [symbol, daily_returns]
+        output_fields: [current_regime, regime_confidence]
+        required: false
+
+      backtest:
+        agent: backtest
+        task: "信号回测验证 {symbol}：walk-forward + 过拟合检查"
+        depends_on: [technical]
+        input_filter: [symbol, signal, daily_returns]
+        output_fields: [walk_forward_report, overfit_warning]
+        required: false
+        timeout_ms: 45000
+
+      risk:
+        agent: risk
+        task: "风险评估 {symbol}：VaR、仓位、压力测试"
+        depends_on: [technical, sentiment, regime, backtest]
+        input_filter: [symbol, portfolio, signal, sentiment_score, current_regime, overfit_warning, data_quality_score]
+        output_fields: [risk_level, risk_assessment, position_suggestion]
+        required: true
+
+      report:
+        agent: report
+        task: "综合分析报告 — 三场景（乐观/中性/悲观）"
+        depends_on: [technical, sentiment, regime, risk, backtest]
+        input_filter: ["*"]
+        output_fields: [report_markdown, executive_summary, scenarios]
+        required: true
+
+  # ──────────────────────────────────────────────────────────
+  # 交易决策全流程
+  # ──────────────────────────────────────────────────────────
+  trade_decision:
+    description: "交易决策 — 分析→风控→仓位→执行计划→确认门"
+    budget_tokens: 60000
+    max_duration_ms: 120000
+    require_all_outputs:
+      - data_quality_score
+      - data_gaps
+      - confidence_score
+      - key_assumptions
+      - failure_modes
+      - risk_level
+      - gate_request_id
+
+    steps:
+      data_qa:
+        agent: data_qa
+        task: "检查 {symbol} 数据质量"
+        depends_on: []
+        input_filter: [symbol]
+        output_fields: [data_quality_score, data_gaps, is_sufficient]
+        required: true
+        timeout_ms: 10000
+
+      technical:
+        agent: analyst
+        task: "技术面分析 {symbol}"
+        depends_on: [data_qa]
+        input_filter: [symbol, quote, indicators, data_quality_score]
+        output_fields: [signal, dimensions, confidence_score, key_assumptions, failure_modes]
+        required: true
+
+      sentiment:
+        agent: sentiment
+        task: "舆情分析 {symbol}"
+        depends_on: [data_qa]
+        input_filter: [symbol, news_items]
+        output_fields: [sentiment_score, sentiment_signal]
+        required: false
+
+      regime:
+        agent: regime
+        task: "regime 判断"
+        depends_on: [data_qa]
+        input_filter: [symbol, daily_returns]
+        output_fields: [current_regime, regime_confidence]
+        required: false
+
+      risk:
+        agent: risk
+        task: "风险评估与仓位建议"
+        depends_on: [technical, sentiment, regime]
+        input_filter: [symbol, portfolio, signal, sentiment_score, current_regime, data_quality_score]
+        output_fields: [risk_level, risk_assessment, position_suggestion, risk_approved]
+        required: true
+
+      portfolio:
+        agent: portfolio
+        task: "仓位构建：计算最优仓位"
+        depends_on: [risk]
+        input_filter: [symbol, portfolio, risk_level, position_suggestion, capital_balance]
+        output_fields: [suggested_shares, suggested_weight, concentration_warnings]
+        required: true
+
+      exec_plan:
+        agent: exec_plan
+        task: "生成执行计划并创建确认门请求"
+        depends_on: [risk, portfolio]
+        input_filter: [symbol, action, suggested_shares, risk_approved, risk_level, position_suggestion]
+        output_fields: [gate_request_id, execution_plan, simulation_record]
+        required: true
+
+      trader:
+        agent: trader
+        task: "执行交易：验证门状态并记录交易"
+        depends_on: [exec_plan]
+        input_filter: [symbol, action, suggested_shares, risk_approved, gate_request_id, execution_plan]
+        output_fields: [trade_id, trade_status]
+        required: false
+
+  # ──────────────────────────────────────────────────────────
+  # 持仓诊断
+  # ──────────────────────────────────────────────────────────
+  portfolio_review:
+    description: "持仓诊断 — 关联性、风险、优化建议"
+    budget_tokens: 40000
+    max_duration_ms: 120000
+    require_all_outputs:
+      - data_quality_score
+      - data_gaps
+      - confidence_score
+      - key_assumptions
+      - failure_modes
+      - risk_level
+
+    steps:
+      data_qa:
+        agent: data_qa
+        task: "检查持仓数据质量"
+        depends_on: []
+        input_filter: [portfolio]
+        output_fields: [data_quality_score, data_gaps, is_sufficient]
+        required: true
+        timeout_ms: 10000
+
+      correlation:
+        agent: correlation
+        task: "持仓关联性分析"
+        depends_on: [data_qa]
+        input_filter: [portfolio, returns_matrix]
+        output_fields: [correlation_matrix, highly_correlated, diversification_score]
+        required: false
+
+      risk:
+        agent: risk
+        task: "组合风险评估：VaR、压力测试"
+        depends_on: [data_qa, correlation]
+        input_filter: [portfolio, correlation_matrix, data_quality_score]
+        output_fields: [risk_level, risk_assessment, var_result, confidence_score, key_assumptions, failure_modes]
+        required: true
+
+      portfolio_opt:
+        agent: portfolio
+        task: "仓位优化建议"
+        depends_on: [risk, correlation]
+        input_filter: [portfolio, risk_level, correlation_matrix, diversification_score, capital_balance]
+        output_fields: [adjustments, concentration_warnings]
+        required: true
+
+      report:
+        agent: report
+        task: "持仓诊断报告"
+        depends_on: [risk, correlation, portfolio_opt]
+        input_filter: ["*"]
+        output_fields: [report_markdown, executive_summary, scenarios]
+        required: true
+
+  # ──────────────────────────────────────────────────────────
+  # 大盘综述
+  # ──────────────────────────────────────────────────────────
+  market_overview:
+    description: "大盘综述 — regime、舆情、全球联动"
+    budget_tokens: 30000
+    max_duration_ms: 120000
+    require_all_outputs:
+      - data_quality_score
+      - confidence_score
+      - key_assumptions
+      - failure_modes
+
+    steps:
+      data_qa:
+        agent: data_qa
+        task: "检查市场数据质量"
+        depends_on: []
+        input_filter: [indices_data]
+        output_fields: [data_quality_score, data_gaps, is_sufficient]
+        required: true
+        timeout_ms: 10000
+
+      regime:
+        agent: regime
+        task: "当前市场 regime 判断"
+        depends_on: [data_qa]
+        input_filter: [daily_returns, indices_data]
+        output_fields: [current_regime, regime_confidence, confidence_score, key_assumptions, failure_modes]
+        required: true
+
+      sentiment:
+        agent: sentiment
+        task: "市场情绪与热点舆情"
+        depends_on: [data_qa]
+        input_filter: [news_items, hot_stocks]
+        output_fields: [sentiment_score, sentiment_signal, key_events]
+        required: false
+
+      report:
+        agent: report
+        task: "大盘综述报告"
+        depends_on: [regime, sentiment]
+        input_filter: ["*"]
+        output_fields: [report_markdown, executive_summary, scenarios]
+        required: true
+
+  # ──────────────────────────────────────────────────────────
+  # 协同交易决策 (Collaborative Decision — Phase 5)
+  # ──────────────────────────────────────────────────────────
+  collaborative_decision:
+    description: "多Agent协同交易决策 — 独立分析→投票→风控否决权→报告"
+    budget_tokens: 60000
+    max_duration_ms: 180000
+    require_all_outputs:
+      - action
+      - confidence
+      - risk_level
+
+    steps:
+      data_qa:
+        agent: data_qa
+        task: "验证 {symbol} 数据质量和可用性"
+        depends_on: []
+        input_filter: [symbol]
+        output_fields: [data_quality_score, available_data]
+        required: true
+        timeout_ms: 10000
+
+      # 并行分析层 — 三个Agent独立评估
+      analyst:
+        agent: analyst
+        task: "技术面分析 {symbol}: MA排列/MACD/RSI/形态/支撑阻力 + 量化融合信号"
+        depends_on: [data_qa]
+        input_filter: [symbol, quote, indicators, data_quality_score]
+        output_fields: [technical_signal, technical_score, key_levels]
+        required: true
+
+      sentiment:
+        agent: sentiment
+        task: "情报+舆情分析 {symbol}: 最新情报信号+新闻情绪+社会热度+宏观联动"
+        depends_on: [data_qa]
+        input_filter: [symbol, news_items, intel_signals, macro_signals]
+        output_fields: [sentiment_signal, sentiment_score, key_events]
+        required: false
+
+      regime:
+        agent: regime
+        task: "宏观环境分析 {symbol}: 市场阶段+板块轮动+跨市场联动+全球宏观"
+        depends_on: [data_qa]
+        input_filter: [symbol, daily_returns, global_markets]
+        output_fields: [regime_signal, regime_phase, macro_impact]
+        required: false
+
+      # 风控层 — 一票否决权
+      risk:
+        agent: risk
+        task: "风险评估 {symbol}: VaR+集中度+流动性+熔断检查"
+        depends_on: [analyst, sentiment, regime]
+        input_filter: [symbol, portfolio, technical_signal, technical_score, sentiment_signal, sentiment_score, regime_signal, regime_phase, data_quality_score]
+        output_fields: [risk_level, risk_score, risk_warnings, veto]
+        required: true
+
+      # 投票决策层
+      decision:
+        agent: portfolio
+        task: "综合投票决策 {symbol}: 计算加权信号，输出action+entry/target/stop"
+        depends_on: [analyst, sentiment, regime, risk]
+        input_filter: [symbol, technical_signal, technical_score, sentiment_signal, sentiment_score, regime_signal, regime_phase, risk_level, risk_score, veto, capital_balance, portfolio]
+        output_fields: [action, confidence, entry_price, target_price, stop_loss, vote_detail]
+        required: true
+
+      # 报告层
+      report:
+        agent: report
+        task: "生成交易决策报告 {symbol}: 证据链+反向验证+三场景分析"
+        depends_on: [decision]
+        input_filter: ["*"]
+        output_fields: [report_text, contrarian_check, scenarios]
+        required: true
+
+  # ──────────────────────────────────────────────────────────
+  # 研究工作站 (Research Workstation)
+  # ──────────────────────────────────────────────────────────
+  research_workstation:
+    description: "三模型协同研究 — 哨兵扫描→量化推理→贝叶斯融合"
+    budget_tokens: 30000
+    max_duration_ms: 180000
+
+    steps:
+      sentinel:
+        agent: sentinel
+        task: "哨兵扫描: 新闻/异动/热度 + Gemini情绪合成"
+        depends_on: []
+        input_filter: [symbols]
+        output_fields: [sentinel_output, fallback_used]
+        required: false
+        timeout_ms: 60000
+
+      actuary:
+        agent: actuary
+        task: "精算师推理: Qlib量化预测 + IC验证"
+        depends_on: []
+        input_filter: [symbols]
+        output_fields: [qlib_predictions, ic_values]
+        required: false
+        timeout_ms: 60000
+
+      aggregation:
+        agent: aggregator
+        task: "贝叶斯融合: 多源信号加权 + A股约束检查"
+        depends_on: [sentinel, actuary]
+        input_filter: [symbols, sentinel_output, qlib_predictions]
+        output_fields: [research_signals, fusion_confidence]
+        required: true
+        timeout_ms: 60000

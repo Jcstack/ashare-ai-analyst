@@ -1,0 +1,23 @@
+# Broker configuration — simulation-first default
+# Mode: simulation (default) | qmt (XtQuant live) | live (generic stub)
+
+mode: simulation
+
+simulation:
+  record_all_orders: true
+  max_simulation_orders: 1000
+
+# QMT broker settings (used when mode: qmt)
+qmt:
+  account_id: ''           # QMT trading account ID (required for mode: qmt)
+  mini_qmt_path: ''        # Path to QMT mini terminal
+  max_order_amount: 100000 # Maximum single order amount (CNY)
+  allowed_actions:
+    - buy
+    - sell
+
+live:
+  require_gate_verified: true     # Must pass ConfirmationGate VERIFIED
+  require_explicit_config: true   # User must set mode=live manually
+  # broker_api_url: ""            # Real broker API endpoint (NOT IMPLEMENTED)
+  # broker_api_key: ""            # Via env var only: BROKER_API_KEY

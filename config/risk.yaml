@@ -1,0 +1,76 @@
+# v17.0 Risk Engine Configuration
+# All thresholds calibrated for A-share market characteristics.
+
+var:
+  # Historical simulation window (trading days)
+  historical_window: 250
+  # Confidence levels for VaR
+  confidence_levels: [0.95, 0.99]
+  # Monte Carlo simulation count for CVaR
+  monte_carlo_simulations: 10000
+  # Default holding period (days)
+  holding_period: 1
+
+factor_attribution:
+  # Market benchmark index
+  benchmark_index: "000300"  # CSI 300
+  # Rolling window for beta calculation (trading days)
+  beta_window: 60
+  # Industry classification scheme
+  industry_source: "eastmoney"  # AKShare concept board
+
+stress_test:
+  scenarios:
+    crash_2015:
+      name: "2015年股灾"
+      description: "2015.06-2015.08 A股去杠杆崩盘"
+      market_shock: -0.45
+      duration_days: 60
+      sector_multipliers:
+        券商: 1.5
+        创业板: 1.3
+        银行: 0.8
+
+    covid_2020:
+      name: "2020年新冠疫情"
+      description: "2020.01-2020.03 全球疫情冲击"
+      market_shock: -0.15
+      duration_days: 30
+      sector_multipliers:
+        航空: 2.0
+        旅游: 1.8
+        医药: -0.5  # counter-move (positive impact)
+
+    realestate_2022:
+      name: "2022年地产危机"
+      description: "2022 房企暴雷连锁反应"
+      market_shock: -0.12
+      duration_days: 90
+      sector_multipliers:
+        地产: 2.5
+        银行: 1.3
+        建材: 1.5
+
+position_sizing:
+  # Maximum single-position weight (30% cap per A-share best practice)
+  max_single_weight: 0.30
+  # Minimum position size in shares (A-share lot = 100)
+  min_lot_size: 100
+  # Kelly fraction scaling (conservative multiplier, typically 0.25-0.5)
+  kelly_fraction: 0.25
+  # Target annual volatility for vol-scaling
+  target_volatility: 0.15
+  # Maximum total leverage (1.0 = no leverage)
+  max_leverage: 1.0
+
+circuit_breaker:
+  # Daily portfolio loss threshold to trigger halt
+  daily_loss_threshold: -0.15
+  # Weekly portfolio loss threshold to trigger pause
+  weekly_loss_threshold: -0.25
+  # Cooldown period after daily halt (trading days)
+  daily_cooldown_days: 1
+  # Cooldown period after weekly pause (trading days)
+  weekly_cooldown_days: 3
+  # Maximum consecutive halt days before escalation
+  max_consecutive_halts: 3

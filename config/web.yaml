@@ -1,0 +1,18 @@
+# Web UI 配置 (Web Interface Config)
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+  debug: true
+  reload: true
+
+chart:
+  cache_ttl_seconds: 300   # Chart HTML cache TTL (5 min)
+  default_chart_height: 600
+  default_indicators:
+    - "MA_5"
+    - "MA_20"
+    - "MA_60"
+
+theme:
+  default: "astock"         # astock (light) or astock-dark

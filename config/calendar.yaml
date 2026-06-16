@@ -1,0 +1,147 @@
+# Trading calendar configuration
+# Per PRD v3.2 FR-HS001: Trading calendar service
+
+sessions:
+  pre_market:
+    start: "09:15"
+    end: "09:30"
+  morning:
+    start: "09:30"
+    end: "11:30"
+  lunch_break:
+    start: "11:30"
+    end: "13:00"
+  afternoon:
+    start: "13:00"
+    end: "15:00"
+  after_hours:
+    start: "15:00"
+    end: "17:00"
+
+# Manual overrides for trading days that adata gets wrong (rare).
+# Format: YYYY-MM-DD: true (is trading day) or false (is not trading day)
+# adata sources data from SZSE and is generally accurate.
+overrides: {}
+#  "2026-01-01": false  # example override
+
+# Consecutive non-trading days threshold for "holiday period"
+holiday_period_threshold: 3
+
+# Known CSRC-announced holidays for A-share markets (2025-2026).
+# Source: China Securities Regulatory Commission annual holiday notices.
+# Each holiday has: name (Chinese), dates (list of non-trading dates),
+# and optional makeup_days (补班日 — weekend days that become trading days).
+known_holidays:
+  # --- 2025 ---
+  "2025_new_year":
+    name: "元旦"
+    dates: ["2025-01-01"]
+    makeup_days: []
+
+  "2025_spring_festival":
+    name: "春节"
+    dates:
+      - "2025-01-28"
+      - "2025-01-29"
+      - "2025-01-30"
+      - "2025-01-31"
+      - "2025-02-03"
+      - "2025-02-04"
+    makeup_days: ["2025-01-26"]
+
+  "2025_qingming":
+    name: "清明节"
+    dates: ["2025-04-04"]
+    makeup_days: []
+
+  "2025_labor_day":
+    name: "劳动节"
+    dates:
+      - "2025-05-01"
+      - "2025-05-02"
+      - "2025-05-05"
+    makeup_days: ["2025-04-27"]
+
+  "2025_dragon_boat":
+    name: "端午节"
+    dates:
+      - "2025-05-30"
+      - "2025-06-02"
+    makeup_days: []
+
+  "2025_mid_autumn":
+    name: "中秋节"
+    dates: ["2025-10-06"]
+    makeup_days: ["2025-09-28"]
+
+  "2025_national_day":
+    name: "国庆节"
+    dates:
+      - "2025-10-01"
+      - "2025-10-02"
+      - "2025-10-03"
+      - "2025-10-07"
+      - "2025-10-08"
+    makeup_days: ["2025-10-11"]
+
+  # --- 2026 ---
+  "2026_new_year":
+    name: "元旦"
+    dates: ["2026-01-01", "2026-01-02"]
+    makeup_days: []
+
+  "2026_spring_festival":
+    name: "春节"
+    # 上交所公告: 2月15日(日)至2月23日(一)休市，2月24日(二)起照常开市
+    dates:
+      - "2026-02-16"
+      - "2026-02-17"
+      - "2026-02-18"
+      - "2026-02-19"
+      - "2026-02-20"
+      - "2026-02-23"
+    makeup_days: []
+
+  "2026_qingming":
+    name: "清明节"
+    dates: ["2026-04-06"]
+    makeup_days: []
+
+  "2026_labor_day":
+    name: "劳动节"
+    # SSE: 5月1日至5月5日休市，5月6日起照常开市
+    dates:
+      - "2026-05-01"
+      - "2026-05-04"
+      - "2026-05-05"
+    makeup_days: []
+
+  "2026_dragon_boat":
+    name: "端午节"
+    # SSE: 6月19日至6月21日休市，6月22日起照常开市
+    dates: ["2026-06-19"]
+    makeup_days: []
+
+  "2026_mid_autumn":
+    name: "中秋节"
+    # SSE: 9月25日至9月27日休市，9月28日起照常开市
+    dates: ["2026-09-25"]
+    makeup_days: []
+
+  "2026_national_day":
+    name: "国庆节"
+    # SSE: 10月1日至10月7日休市，10月8日起照常开市
+    dates:
+      - "2026-10-01"
+      - "2026-10-02"
+      - "2026-10-05"
+      - "2026-10-06"
+      - "2026-10-07"
+    makeup_days: []
+
+# Emergency closures — runtime or manual additions for black swan events.
+# Format: list of {date: YYYY-MM-DD, reason: "..."}
+# Example:
+#   - date: "2025-03-15"
+#     reason: "台风红色预警，交易所临时休市"
+emergency_closures: []
