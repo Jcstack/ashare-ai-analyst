@@ -27,7 +27,7 @@ backtrader>=1.9.78
 
 # Task queue (任务调度)
 celery[redis]>=5.3.0
-redis>=5.0.0
+redis>=8.0.0
 
 # Notification (通知)
 requests>=2.31.0
