@@ -1,5 +1,14 @@
 # 🧪 A股智能分析平台 · A-Share AI Analysis Platform
 
+<p align="center">
+  <a href="https://github.com/Jcstack/ashare-ai-analyst/actions/workflows/ci.yml"><img src="https://github.com/Jcstack/ashare-ai-analyst/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Jcstack/ashare-ai-analyst/actions/workflows/codeql.yml"><img src="https://github.com/Jcstack/ashare-ai-analyst/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://github.com/Jcstack/ashare-ai-analyst/actions/workflows/gitleaks.yml"><img src="https://github.com/Jcstack/ashare-ai-analyst/actions/workflows/gitleaks.yml/badge.svg" alt="Secret scan"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/python-3.13-blue.svg" alt="Python 3.13">
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome">
+</p>
+
 > **⚠️ 免责声明 / DISCLAIMER**
 >
 > **本项目仅为个人学习与技术探索的玩具项目（Toy Project）。**
