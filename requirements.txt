@@ -1,6 +1,6 @@
 # Data collection (数据采集)
 akshare>=1.12.0
-akshare-proxy-patch>=0.2.7
+akshare-proxy-patch>=0.5.0
 curl-cffi>=0.13.0
 adata>=2.9.0
 pandas>=2.0.0
