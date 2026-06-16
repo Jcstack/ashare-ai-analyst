@@ -8,7 +8,7 @@ numpy>=1.24.0
 pyarrow>=24.0.0
 
 # AI Core (多模型分析预测)
-anthropic>=0.40.0
+anthropic>=0.109.2
 openai>=1.40.0
 google-genai>=1.0.0
 
