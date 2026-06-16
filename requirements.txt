@@ -54,7 +54,7 @@ sse-starlette>=1.8.2
 aiofiles>=23.2.1
 
 # Discord bot (移动指挥中心)
-discord.py>=2.3.0
+discord.py>=2.7.1
 
 # Quantitative prediction (量化预测, optional)
 # qlib>=0.9.0  # Optional: pip install qlib (heavy deps, not in Docker)
