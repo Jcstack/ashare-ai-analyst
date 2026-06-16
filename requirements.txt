@@ -5,7 +5,7 @@ curl-cffi>=0.13.0
 adata>=2.9.0
 pandas>=2.0.0
 numpy>=1.24.0
-pyarrow>=14.0.0
+pyarrow>=24.0.0
 
 # AI Core (多模型分析预测)
 anthropic>=0.40.0
