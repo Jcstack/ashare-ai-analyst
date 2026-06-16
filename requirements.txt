@@ -46,7 +46,7 @@ pyyaml>=6.0
 python-dotenv>=1.0.0
 
 # Web API (FastAPI + React SPA)
-fastapi>=0.109.0
+fastapi>=0.137.1
 uvicorn[standard]>=0.27.0
 gunicorn>=22.0.0
 python-multipart>=0.0.6
