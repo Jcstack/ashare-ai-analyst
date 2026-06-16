@@ -48,7 +48,7 @@ python-dotenv>=1.0.0
 # Web API (FastAPI + React SPA)
 fastapi>=0.137.1
 uvicorn[standard]>=0.27.0
-gunicorn>=22.0.0
+gunicorn>=26.0.0
 python-multipart>=0.0.6
 sse-starlette>=1.8.2
 aiofiles>=23.2.1
