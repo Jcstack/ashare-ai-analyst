@@ -5,6 +5,8 @@ Part of v28.0 Smart Stock Recommendation System.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from src.recommendation.screener import StockScreener, _safe_float
@@ -570,13 +572,15 @@ class TestDataQuality:
             "screening": {"max_candidates_per_style": 10, "min_score": 0.3},
         }
         screener = StockScreener(config)
-        # Sina-like stock with very high change_pct (would score ~1.0 on momentum)
+        # Sina-like stock with strong (but not limit-up) momentum: uncapped it would
+        # score ~0.8, so the data_quality cap to 0.7 is what's exercised here.
+        # (A ~limit-up change_pct would instead be removed by the T+1 drift filter.)
         data = [
             {
                 "symbol": "600001",
                 "name": "测试",
                 "price": 10.0,
-                "change_pct": 9.5,
+                "change_pct": 5.0,
                 "volume": 100000,
                 "turnover_rate": None,
                 "pe_ratio": None,
@@ -586,7 +590,10 @@ class TestDataQuality:
                 "volume_ratio": None,
             },
         ]
-        candidates = screener.screen("momentum", data)
+        # Mock the live akshare listing-date lookup so the test is deterministic
+        # and network-free (otherwise the recent-IPO filter depends on a real fetch).
+        with patch.object(screener, "_fetch_listing_dates", return_value={}):
+            candidates = screener.screen("momentum", data)
         assert len(candidates) == 1
         # Score should be capped at 0.7 due to data_quality < 0.2
         assert candidates[0].score <= 0.7

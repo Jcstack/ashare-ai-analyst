@@ -40,18 +40,25 @@ class TestInitProxyPatch:
         for name in ("init_proxy_patch", "em_api_call", "is_proxy_active"):
             assert name in mod.__all__
 
-    def test_init_does_not_install_proxy_patch(self) -> None:
-        """init_proxy_patch should NOT activate akshare-proxy-patch."""
+    def test_init_proactively_activates_proxy_patch(self) -> None:
+        """init_proxy_patch activates akshare-proxy-patch proactively.
+
+        The proxy is installed at startup (not lazily on first failure) to avoid
+        a cold-start timeout penalty on the first AKShare call.
+        """
         import src.data.eastmoney_proxy as mod
 
         with (
-            patch.object(mod, "_install_akshare_proxy_patch") as mock_install,
+            patch.object(
+                mod, "_install_akshare_proxy_patch", return_value=True
+            ) as mock_install,
             patch("src.data.eastmoney_client.load_config", return_value={}),
         ):
             mod._initialized = False
+            mod._proxy_patch_active = False
             mod.init_proxy_patch()
-            mock_install.assert_not_called()
-            assert mod._proxy_patch_active is False
+            mock_install.assert_called()
+            assert mod._proxy_patch_active is True
 
 
 class TestEmApiCall:
@@ -104,16 +111,22 @@ class TestEmApiCall:
         assert result == "proxied"
         fn.assert_called_once()
 
-    def test_proxy_activation_fails_raises_original(self) -> None:
-        """If proxy-patch can't be activated, raise the original error."""
+    def test_proxy_activation_fails_degrades_to_none(self) -> None:
+        """If proxy-patch can't be activated, a connection error degrades to None.
+
+        em_api_call returns None on connection failures (graceful degradation so
+        callers get no data rather than an exception); non-connection errors still
+        propagate (covered by other tests).
+        """
         import src.data.eastmoney_proxy as mod
 
         from requests.exceptions import ConnectionError as ReqConnError
 
         fn = MagicMock(side_effect=ReqConnError("blocked"))
+        mod._proxy_patch_active = False
         with patch.object(mod, "activate_proxy_patch", return_value=False):
-            with pytest.raises(ReqConnError):
-                mod.em_api_call(fn)
+            result = mod.em_api_call(fn)
+        assert result is None
 
 
 class TestIsConnectionError:

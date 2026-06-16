@@ -330,35 +330,3 @@ def mock_llm_response():
         latency_ms=500.0,
         cost_usd=0.003,
     )
-
-
-# ---------------------------------------------------------------------------
-# Known pre-existing unit-test failures, marked xfail so CI stays green while
-# they are triaged. These predate the open-source release (the repo had no CI
-# before). Each reflects an intentional design change or env-bound behavior the
-# test was never updated for; fixing them correctly needs maintainer intent.
-# Remove an entry once its test is fixed. Tracking: #22
-# ---------------------------------------------------------------------------
-_KNOWN_FAILURES = {
-    # Bootstrap was refactored to capability-based agent registration; this test
-    # still mocks the old config-driven path. Needs a rewrite to the new design.
-    "tests/unit/test_agent_registry.py::TestAgentRegistry::test_bootstrap_creates_agents",
-    # init_proxy_patch() now activates the proxy proactively (documented design
-    # change for cold-start latency); these assert the old lazy behavior.
-    "tests/unit/test_eastmoney_proxy.py::TestInitProxyPatch::test_init_does_not_install_proxy_patch",
-    "tests/unit/test_eastmoney_proxy.py::TestEmApiCall::test_proxy_activation_fails_raises_original",
-    # Screener score depends on a live akshare listing-date fetch; flaky/env-bound.
-    "tests/unit/test_screener.py::TestDataQuality::test_score_cap_for_low_quality",
-}
-
-
-def pytest_collection_modifyitems(config, items):
-    """Mark known pre-existing failures as xfail (non-strict) for CI stability."""
-    for item in items:
-        if item.nodeid in _KNOWN_FAILURES:
-            item.add_marker(
-                pytest.mark.xfail(
-                    reason="Pre-existing failure under triage (see tracking issue)",
-                    strict=False,
-                )
-            )
