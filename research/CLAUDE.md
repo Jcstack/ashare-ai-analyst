@@ -60,6 +60,7 @@ MCP 不可用时自动降级到本地数据。
 
 ## Documentation
 
-- `.claude/session-state.md` — 研究会话状态
 - `../docs/guides/development-guide.md` — 系统架构参考（按需读取）
 - `../config/research.yaml` — 贝叶斯融合权重配置
+
+> `.claude/` 下的会话状态等为本机文件，不纳入版本控制。

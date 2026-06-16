@@ -113,9 +113,9 @@ class TestAnthropicProvider:
 
         provider = AnthropicProvider(
             api_key="sk-test12345678",
-            default_model="claude-opus-4-6",
+            default_model="claude-opus-4-8",
         )
-        assert provider.default_model == "claude-opus-4-6"
+        assert provider.default_model == "claude-opus-4-8"
 
     def test_check_balance(self, mock_anthropic_sdk):
         from src.llm.anthropic import AnthropicProvider

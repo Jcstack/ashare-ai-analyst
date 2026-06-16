@@ -196,6 +196,33 @@ npm run dev        # 开发模式 / Dev mode
 
 ---
 
+## 用 Claude Code 开发 · Develop with Claude Code
+
+This repo is built to be picked up efficiently with [Claude Code](https://claude.com/claude-code)
+(or any AI coding agent). It ships project context and ready-made commands:
+
+- [`CLAUDE.md`](CLAUDE.md) — project memory loaded into context automatically: stack,
+  architecture, setup, commands, conventions, and gotchas. **Read this first.**
+- [`.claude/commands/`](.claude/commands/) — project slash commands: `/verify`, `/lint`,
+  `/test` run the exact checks CI gates on.
+- [`.claude/settings.json`](.claude/settings.json) — shared, secret-free settings (a safe
+  read/test command allowlist so you get fewer permission prompts). Personal overrides go
+  in `.claude/settings.local.json` (git-ignored).
+- [`research/CLAUDE.md`](research/CLAUDE.md) — a separate analyst-persona project root:
+  `cd research && claude`.
+
+```bash
+# from the repo root
+claude            # start a session; CLAUDE.md context loads automatically
+> /verify         # run lint + unit tests + frontend build, the way CI does
+```
+
+LLM configuration (Claude via the Claude Code bridge or the Anthropic API, with a Gemini
+fallback) lives in [`config/llm.yaml`](config/llm.yaml). Model IDs follow Anthropic's
+current catalog (`claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`).
+
+---
+
 ## 社区与开源协作 · Community
 
 - [`LICENSE`](LICENSE) — MIT license

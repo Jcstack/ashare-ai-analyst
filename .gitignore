@@ -36,8 +36,12 @@ logs/
 *.env
 !.env.example
 
-# Local AI-assistant / agent state (personal, machine-specific)
-.claude/
+# Claude Code: commit shared config (settings.json, commands/) only; ignore personal/local state
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+.claude/settings.local.json
+.claude/session-state.md
 .mcp.json
 
 # Editor/refactor backups & junk

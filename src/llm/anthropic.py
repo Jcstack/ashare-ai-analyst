@@ -27,8 +27,8 @@ logger = get_logger("llm.anthropic")
 _ANTHROPIC_COSTS_FALLBACK: dict[str, dict[str, float]] = {
     "claude-sonnet-4-6": {"input": 0.003, "output": 0.015},
     "claude-sonnet-4-5-20250929": {"input": 0.003, "output": 0.015},
-    "claude-opus-4-6": {"input": 0.015, "output": 0.075},
-    "claude-haiku-3-5": {"input": 0.0008, "output": 0.004},
+    "claude-opus-4-8": {"input": 0.005, "output": 0.025},
+    "claude-haiku-4-5": {"input": 0.001, "output": 0.005},
 }
 
 # Load pricing from config/llm.yaml, merge with fallback
