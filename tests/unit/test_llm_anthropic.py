@@ -104,7 +104,7 @@ class TestAnthropicProvider:
         from src.llm.anthropic import AnthropicProvider
 
         provider = AnthropicProvider(api_key="sk-test12345678")
-        assert provider.default_model == "claude-sonnet-4-5-20250929"
+        assert provider.default_model == "claude-sonnet-4-6"
 
     def test_custom_model(self, mock_anthropic_sdk, mock_response):
         mock_anthropic_sdk.messages.create.return_value = mock_response

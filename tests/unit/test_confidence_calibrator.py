@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,9 @@ def _insert_decisions(
     """Insert mock decisions with specified accuracy."""
     conn = sqlite3.connect(db_path)
     correct_count = int(count * correct_ratio)
+    # Use a recent timestamp so rows fall within the calibrator's lookback window
+    # (must be relative to "now", not a hardcoded date, or the test rots over time).
+    decided_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     for i in range(count):
         is_correct = 1 if i < correct_count else 0
         conn.execute(
@@ -62,7 +66,7 @@ def _insert_decisions(
                 f"p-{action}-{i}",
                 "600519",
                 action,
-                "2026-03-07T10:00:00+00:00",
+                decided_at,
                 1800.0,
                 2.0 if is_correct else -2.0,
                 is_correct,

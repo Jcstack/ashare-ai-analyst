@@ -32,6 +32,7 @@ _DEFAULT_RULES: dict[SignalType, int] = {
     SignalType.S7_POLICY_DRIVEN: 2,
     SignalType.S8_MACRO_DRIVEN: 2,
     SignalType.S9_REGIME_CHANGE: 2,
+    SignalType.S10_BLACK_SWAN: 2,  # extreme tail event — require corroboration
     SignalType.STOCK_ALERT: 1,
     SignalType.SYSTEM_ALERT: 0,  # auto-confirm (system-generated)
 }

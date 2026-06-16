@@ -335,18 +335,19 @@ def mock_llm_response():
 # ---------------------------------------------------------------------------
 # Known pre-existing unit-test failures, marked xfail so CI stays green while
 # they are triaged. These predate the open-source release (the repo had no CI
-# before) and span unrelated subsystems. Remove an entry once its test is fixed.
-# Tracking: https://github.com/Jcstack/ashare-ai-analyst/issues
+# before). Each reflects an intentional design change or env-bound behavior the
+# test was never updated for; fixing them correctly needs maintainer intent.
+# Remove an entry once its test is fixed. Tracking: #22
 # ---------------------------------------------------------------------------
 _KNOWN_FAILURES = {
+    # Bootstrap was refactored to capability-based agent registration; this test
+    # still mocks the old config-driven path. Needs a rewrite to the new design.
     "tests/unit/test_agent_registry.py::TestAgentRegistry::test_bootstrap_creates_agents",
-    "tests/unit/test_confidence_calibrator.py::TestCalibrate::test_high_accuracy_boosts_confidence",
-    "tests/unit/test_confidence_calibrator.py::TestCalibrate::test_low_accuracy_penalizes_confidence",
-    "tests/unit/test_confidence_calibrator.py::TestCalibrationReport::test_report_with_data",
-    "tests/unit/test_confirmation_gate_v2.py::TestSignalConfirmationGate::test_get_rules",
+    # init_proxy_patch() now activates the proxy proactively (documented design
+    # change for cold-start latency); these assert the old lazy behavior.
     "tests/unit/test_eastmoney_proxy.py::TestInitProxyPatch::test_init_does_not_install_proxy_patch",
     "tests/unit/test_eastmoney_proxy.py::TestEmApiCall::test_proxy_activation_fails_raises_original",
-    "tests/unit/test_llm_anthropic.py::TestAnthropicProvider::test_default_model",
+    # Screener score depends on a live akshare listing-date fetch; flaky/env-bound.
     "tests/unit/test_screener.py::TestDataQuality::test_score_cap_for_low_quality",
 }
 
