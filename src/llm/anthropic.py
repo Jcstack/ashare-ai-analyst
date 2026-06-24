@@ -64,12 +64,7 @@ class AnthropicProvider(BaseLLMProvider):
         self._max_retries = max_retries
         self._client = anthropic.Anthropic(api_key=api_key, timeout=request_timeout)
 
-        masked = api_key[:8] + "***" if len(api_key) > 8 else "***"
-        logger.info(
-            "AnthropicProvider initialized (key: %s, model: %s)",
-            masked,
-            default_model,
-        )
+        logger.info("AnthropicProvider initialized (model: %s)", default_model)
 
     @property
     def provider_name(self) -> ProviderName:

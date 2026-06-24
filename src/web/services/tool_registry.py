@@ -3530,6 +3530,7 @@ def _get_market_pulse() -> dict[str, Any]:
         pulse["indices"] = {"error": str(exc)}
 
     # 2. Portfolio positions with LIVE P&L
+    total_value = 0.0
     try:
         from src.web.dependencies import get_capital_service, get_portfolio_store
 

@@ -67,12 +67,7 @@ class OpenAIProvider(BaseLLMProvider):
         self._max_retries = max_retries
         self._client = openai.OpenAI(api_key=api_key)
 
-        masked = api_key[:8] + "***" if len(api_key) > 8 else "***"
-        logger.info(
-            "OpenAIProvider initialized (key: %s, model: %s)",
-            masked,
-            default_model,
-        )
+        logger.info("OpenAIProvider initialized (model: %s)", default_model)
 
     @property
     def provider_name(self) -> ProviderName:

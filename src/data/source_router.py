@@ -91,7 +91,7 @@ class DataSourceRouter:
         }
         # Pre-mark blocked domains
         for blocked in self._blocked_domains:
-            for domain in SourceDomain:
+            for domain in list(SourceDomain):
                 if domain.value in blocked or blocked in domain.value:
                     self._sources[domain].health = SourceHealth.DOWN
                     logger.info(

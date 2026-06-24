@@ -242,6 +242,7 @@ class CallAuctionCollector:
                 bus = EventBus()
                 bus.publish(
                     stream="events:signal",
+                    event_type="call_auction",
                     data={
                         "type": "call_auction",
                         "symbol": c["symbol"],

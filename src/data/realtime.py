@@ -262,11 +262,18 @@ class RealtimeQuoteManager:
         for batch in batches:
             self._rate_limit_wait()
 
-            # Build Sina symbol list: 6xxxxx→sh6xxxxx, others→sz
+            # Build Sina symbol list: 6xxxxx→sh6xxxxx, others→sz.
+            # Only accept 6-digit numeric A-share codes; this also prevents
+            # any untrusted value from tainting the request URL (SSRF).
             sina_syms = []
             for sym in batch:
+                if not re.fullmatch(r"\d{6}", sym):
+                    continue
                 prefix = "sh" if sym.startswith(("6", "9")) else "sz"
                 sina_syms.append(f"{prefix}{sym}")
+
+            if not sina_syms:
+                continue
 
             url = f"https://hq.sinajs.cn/list={','.join(sina_syms)}"
             try:

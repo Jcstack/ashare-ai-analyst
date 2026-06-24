@@ -1618,7 +1618,7 @@ class AgentService:
     # Request classification for prompt tiering
     # ------------------------------------------------------------------
 
-    _RE_STOCK_ANALYSIS = re.compile(r"\d{6}|[A-Za-z]+股|分析|研究")
+    _RE_STOCK_ANALYSIS = re.compile(r"\d{6}|[A-Za-z]股|分析|研究")
     _RE_TRADE_DECISION = re.compile(r"该不该买|要不要卖|建议|操作|加仓|减仓|止损")
     _RE_PORTFOLIO_REVIEW = re.compile(r"持仓|仓位|账户|资金|盈亏")
     _RE_MARKET_OVERVIEW = re.compile(r"大盘|市场|行情|今天|指数")

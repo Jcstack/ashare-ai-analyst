@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from src.intelligence_hub.dedup import DedupChecker, _normalize_title, _normalize_url
 from src.intelligence_hub.models import InfoItem
 
@@ -30,7 +32,7 @@ class TestNormalization:
     def test_normalize_url_lowercase_host(self) -> None:
         url = "https://Example.COM/Path"
         normalized = _normalize_url(url)
-        assert "example.com" in normalized
+        assert urlparse(normalized).hostname == "example.com"
 
     def test_normalize_url_trailing_slash(self) -> None:
         url1 = _normalize_url("https://example.com/path/")

@@ -46,20 +46,18 @@ class DeepSeekProvider(OpenAIProvider):
         default_model: str = "deepseek-chat",
         max_retries: int = 3,
     ) -> None:
-        self._api_key = api_key
-        self._default_model = default_model
-        self._max_retries = max_retries
+        super().__init__(
+            api_key=api_key,
+            default_model=default_model,
+            max_retries=max_retries,
+        )
+        # Override the OpenAI client to target the DeepSeek-compatible endpoint.
         self._client = openai.OpenAI(
             api_key=api_key,
             base_url=_DEEPSEEK_BASE_URL,
         )
 
-        masked = api_key[:8] + "***" if len(api_key) > 8 else "***"
-        logger.info(
-            "DeepSeekProvider initialized (key: %s, model: %s)",
-            masked,
-            default_model,
-        )
+        logger.info("DeepSeekProvider initialized (model: %s)", default_model)
 
     @property
     def provider_name(self) -> ProviderName:

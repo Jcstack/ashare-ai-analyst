@@ -32,6 +32,7 @@ def test_tcp_tls(
     for _ in range(rounds):
         t0 = time.perf_counter()
         ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         with socket.create_connection((host, 443), timeout=10) as sock:
             with ctx.wrap_socket(sock, server_hostname=host):
                 pass

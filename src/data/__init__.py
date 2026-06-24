@@ -1,3 +1,10 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .fetcher import StockDataFetcher
+    from .preprocessor import DataPreprocessor
+
+
 def __getattr__(name: str):
     if name == "StockDataFetcher":
         from .fetcher import StockDataFetcher

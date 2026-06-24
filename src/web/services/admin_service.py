@@ -143,7 +143,7 @@ class AdminService:
         total_cost = tracker.get_total_cost(days=days)
 
         provider_summaries = {}
-        for pname in ProviderName:
+        for pname in list(ProviderName):
             summary = tracker.get_provider_summary(pname, days=days)
             # Filter out providers with zero usage to avoid ghost data
             total_calls = summary.get("total_calls", 0) or 0

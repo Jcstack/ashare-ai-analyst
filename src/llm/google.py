@@ -85,10 +85,8 @@ class GoogleProvider(BaseLLMProvider):
             http_options=types.HttpOptions(timeout=int(request_timeout * 1000)),
         )
 
-        masked = api_key[:8] + "***" if len(api_key) > 8 else "***"
         logger.info(
-            "GoogleProvider initialized (key: %s, model: %s, fallback: %s)",
-            masked,
+            "GoogleProvider initialized (model: %s, fallback: %s)",
             default_model,
             fallback_model or "none",
         )

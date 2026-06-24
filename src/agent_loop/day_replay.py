@@ -201,12 +201,20 @@ class DayReplayHarness:
     def _load_actual_outcomes(self) -> dict[str, Any]:
         """Load actual market outcomes for the replay date."""
         try:
+            from datetime import datetime, timedelta
+
             from src.data.fetcher import StockDataFetcher
 
             fetcher = StockDataFetcher()
-            # Get market index performance
-
-            df = fetcher.fetch_daily_ohlcv("000001", days=5)
+            # Get market index performance over a short window covering the
+            # replay date (fetch_daily_ohlcv expects YYYYMMDD bounds).
+            end_dt = datetime.strptime(self._date, "%Y-%m-%d")
+            start_dt = end_dt - timedelta(days=10)
+            df = fetcher.fetch_daily_ohlcv(
+                "000001",
+                start_date=start_dt.strftime("%Y%m%d"),
+                end_date=end_dt.strftime("%Y%m%d"),
+            )
             if df is not None and not df.empty:
                 day_row = df[df["date"] == self._date]
                 if not day_row.empty:
