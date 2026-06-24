@@ -3,7 +3,10 @@
 Entry point: ``python -m src.web.app``
 """
 
+import base64
+import os
 import re
+import secrets
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -128,6 +131,36 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # HTTP Basic Auth — gate the dashboard/API when WEB_USERNAME/WEB_PASSWORD are set.
+    # Leave both empty for open access (default); /health stays public for probes.
+    _web_user = os.environ.get("WEB_USERNAME", "").strip()
+    _web_pass = os.environ.get("WEB_PASSWORD", "").strip()
+    _auth_enabled = bool(_web_user and _web_pass)
+
+    @app.middleware("http")
+    async def basic_auth_middleware(request: Request, call_next) -> JSONResponse:
+        if not _auth_enabled or request.url.path == "/health":
+            return await call_next(request)
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(auth_header[6:]).decode(
+                    "utf-8", errors="replace"
+                )
+                username, _, password = decoded.partition(":")
+                user_ok = secrets.compare_digest(username, _web_user)
+                pass_ok = secrets.compare_digest(password, _web_pass)
+                if user_ok and pass_ok:
+                    return await call_next(request)
+            except (ValueError, UnicodeDecodeError):
+                logger.debug("Basic Auth decode error", exc_info=True)
+        return JSONResponse(
+            status_code=401,
+            # realm must be latin-1 encodable (HTTP header) — keep it ASCII
+            headers={"WWW-Authenticate": 'Basic realm="A-Share Analysis System"'},
+            content={"detail": "Unauthorized"},
+        )
 
     # Symbol validation middleware — reject injection payloads early
     @app.middleware("http")
