@@ -548,10 +548,9 @@ class ReviewAgent:
                 confidence = raw_conf
             elif final_score >= 0.8:
                 confidence = "high"
-            elif final_score >= 0.65:
-                confidence = "medium"
             else:
-                confidence = "low"
+                # final_score >= 0.65 is guaranteed by the earlier filter above.
+                confidence = "medium"
 
             # Read action from LLM output; default to "buy" for backward compat
             raw_action = str(item.get("action", "buy")).lower().strip()

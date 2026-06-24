@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
@@ -69,7 +70,7 @@ async def get_minute_bars(
         # Ensure serializable (NaN → None, datetime → str)
         for bar in bars:
             for k, v in bar.items():
-                if isinstance(v, float) and (v != v):  # NaN check
+                if isinstance(v, float) and math.isnan(v):  # NaN check
                     bar[k] = None
                 elif hasattr(v, "isoformat"):
                     bar[k] = str(v)

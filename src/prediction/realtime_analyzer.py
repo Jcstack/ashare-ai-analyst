@@ -1247,7 +1247,6 @@ class RealtimeAnalyzer:
         depth = 0
         in_string = False
         escape = False
-        end = start
         for i in range(start, len(text)):
             ch = text[i]
             if escape:
@@ -1266,8 +1265,7 @@ class RealtimeAnalyzer:
             elif ch == "}":
                 depth -= 1
                 if depth == 0:
-                    end = i
-                    return text[start : end + 1]
+                    return text[start : i + 1]
 
         # If we reach here, JSON is likely truncated (unclosed braces from
         # hitting max_tokens).  Attempt repair by closing open braces/brackets.

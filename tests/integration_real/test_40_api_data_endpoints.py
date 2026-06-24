@@ -77,7 +77,6 @@ def _test_endpoint(
                 else f"HTTP {resp.status_code}: {resp.text[:200]}",
             )
         )
-        return resp
     except Exception as exc:
         result_collector.record(
             TestResult(
@@ -89,6 +88,8 @@ def _test_endpoint(
             )
         )
         pytest.fail(f"{method} {path} raised: {exc}")
+
+    return resp
 
 
 # ---------------------------------------------------------------------------

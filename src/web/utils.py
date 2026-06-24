@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -28,7 +29,7 @@ def sanitize_records(records: list[dict]) -> list[dict]:
     """
     for rec in records:
         for key, val in rec.items():
-            if isinstance(val, float) and val != val:  # NaN check
+            if isinstance(val, float) and math.isnan(val):  # NaN check
                 rec[key] = None
             elif hasattr(val, "strftime"):
                 rec[key] = str(val)

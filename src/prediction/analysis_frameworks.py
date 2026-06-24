@@ -12,6 +12,7 @@ data injection rules, role definitions, standard disclaimer.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -705,7 +706,7 @@ def _safe_indicator_float(indicators: dict[str, Any], *keys: str) -> float | Non
         if val is not None:
             try:
                 v = float(val)
-                if v == v:  # not NaN
+                if not math.isnan(v):  # not NaN
                     return v
             except (TypeError, ValueError):
                 pass

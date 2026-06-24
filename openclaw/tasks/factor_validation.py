@@ -15,6 +15,7 @@ Uses walk-forward on 90-day rolling windows to compute OOS metrics.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -65,9 +66,7 @@ def _validate_factor(
             if factor_name == "vwap_trigger":
                 # VWAP z-score: (close - vwap) / std
                 if "volume" in df.columns and "close" in df.columns:
-                    typical_price = (
-                        df["high"] + df["low"] + df["close"]
-                    ) / 3
+                    typical_price = (df["high"] + df["low"] + df["close"]) / 3
                     vwap = (typical_price * df["volume"]).cumsum() / df[
                         "volume"
                     ].cumsum()
@@ -99,7 +98,7 @@ def _validate_factor(
             else:
                 continue
 
-            if score is not None and not (score != score):  # not NaN
+            if score is not None and not math.isnan(score):  # not NaN
                 scores.append(float(score))
                 returns.append(float(fwd_return))
 
@@ -113,9 +112,7 @@ def _validate_factor(
         ic = _spearman_rank_corr(scores, returns)
         # Hit rate: % of times sign(score) == sign(return)
         hits = sum(
-            1
-            for s, r in zip(scores, returns)
-            if (s > 0 and r > 0) or (s < 0 and r < 0)
+            1 for s, r in zip(scores, returns) if (s > 0 and r > 0) or (s < 0 and r < 0)
         )
         hit_rate = hits / len(scores)
 
@@ -163,10 +160,26 @@ def task_factor_validation() -> dict:
 
     # Add some broad market representative stocks
     broad_market = [
-        "600519", "000858", "601318", "600036", "000333",
-        "601012", "600276", "000001", "601166", "600000",
-        "002714", "300750", "601888", "600809", "000568",
-        "002475", "600887", "601398", "600030", "002304",
+        "600519",
+        "000858",
+        "601318",
+        "600036",
+        "000333",
+        "601012",
+        "600276",
+        "000001",
+        "601166",
+        "600000",
+        "002714",
+        "300750",
+        "601888",
+        "600809",
+        "000568",
+        "002475",
+        "600887",
+        "601398",
+        "600030",
+        "002304",
     ]
     symbols = list(set(symbols + broad_market))
 
@@ -206,7 +219,9 @@ def task_factor_validation() -> dict:
                 ]
                 return_rows = [
                     {"symbol": s, "return_pct": r / 100.0}
-                    for s, r in zip(symbols[: len(result["returns"])], result["returns"])
+                    for s, r in zip(
+                        symbols[: len(result["returns"])], result["returns"]
+                    )
                 ]
 
                 import asyncio

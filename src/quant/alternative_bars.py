@@ -121,7 +121,6 @@ class AlternativeBarGenerator:
         bar_open = tick_data[0]["price"]
         bar_high = tick_data[0]["price"]
         bar_low = tick_data[0]["price"]
-        bar_close = tick_data[0]["price"]
         bar_start_dt = tick_data[0]["datetime"]
         bar_volume = 0
         bar_amount = 0.0

@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["notifications"])
 
+_GENERIC_ERROR_MESSAGE = "Internal server error"
+
 NOTIFICATIONS_KEY = "notifications:alerts"
 READ_SET_KEY = "notifications:read_ids"
 
@@ -80,9 +82,9 @@ async def mark_notifications_read(
         if ids:
             r.sadd(READ_SET_KEY, *ids)
         return {"status": "ok", "marked": len(ids)}
-    except Exception as exc:
-        logger.warning("Failed to mark notifications read: %s", exc)
-        return {"status": "error", "message": str(exc)}
+    except Exception:
+        logger.exception("Failed to mark notifications read")
+        return {"status": "error", "message": _GENERIC_ERROR_MESSAGE}
 
 
 @router.post("/read-all")
@@ -111,9 +113,9 @@ async def mark_all_notifications_read(
         pipe.execute()
 
         return {"status": "ok", "marked": len(current_ids)}
-    except Exception as exc:
-        logger.warning("Failed to mark all notifications read: %s", exc)
-        return {"status": "error", "message": str(exc)}
+    except Exception:
+        logger.exception("Failed to mark all notifications read")
+        return {"status": "error", "message": _GENERIC_ERROR_MESSAGE}
 
 
 @router.post("/trigger-test")
@@ -139,9 +141,9 @@ async def trigger_test_notification(
         r.lpush(NOTIFICATIONS_KEY, json.dumps(notification, ensure_ascii=False))
         r.publish("notifications:push", json.dumps(notification, ensure_ascii=False))
         return {"status": "ok", "notification": notification}
-    except Exception as exc:
-        logger.warning("Failed to push test notification: %s", exc)
-        return {"status": "error", "message": str(exc)}
+    except Exception:
+        logger.exception("Failed to push test notification")
+        return {"status": "error", "message": _GENERIC_ERROR_MESSAGE}
 
 
 @router.post("/purge-read")
@@ -178,9 +180,9 @@ async def purge_read_notifications(
         pipe.execute()
 
         return {"status": "ok", "purged": purged}
-    except Exception as exc:
-        logger.warning("Failed to purge read notifications: %s", exc)
-        return {"status": "error", "message": str(exc)}
+    except Exception:
+        logger.exception("Failed to purge read notifications")
+        return {"status": "error", "message": _GENERIC_ERROR_MESSAGE}
 
 
 @router.get("/unread-count", response_model=UnreadCountResponse)

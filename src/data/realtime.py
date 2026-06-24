@@ -6,6 +6,7 @@ fallback chain: QMT -> Xueqiu -> Sina (hq.sinajs.cn) -> adata.
 Per PRD v2.0 FR-RT001: Multi-source quote manager with fallback chain.
 """
 
+import math
 import re
 import time
 from typing import Any
@@ -396,7 +397,7 @@ class RealtimeQuoteManager:
                     record[our_key] = item[xq_key]
             # Clean NaN values (same as Sina/adata paths)
             for k, v in record.items():
-                if isinstance(v, float) and v != v:  # NaN check
+                if isinstance(v, float) and math.isnan(v):  # NaN check
                     record[k] = None
             results.append(record)
 
@@ -443,7 +444,7 @@ class RealtimeQuoteManager:
         records = df.to_dict(orient="records")
         for rec in records:
             for k, v in rec.items():
-                if isinstance(v, float) and v != v:  # NaN check
+                if isinstance(v, float) and math.isnan(v):  # NaN check
                     rec[k] = None
         return records
 

@@ -7,6 +7,7 @@ Per PRD v2.0 FR-RT001: SSE streaming for real-time quote updates.
 import asyncio
 import json
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import AsyncGenerator
 
@@ -216,7 +217,7 @@ async def get_dragon_tiger_stats(
     def safe_float(val: object, default: float = 0.0) -> float:
         if val is None:
             return default
-        if isinstance(val, float) and val != val:  # NaN
+        if isinstance(val, float) and math.isnan(val):  # NaN
             return default
         return float(val)
 

@@ -1230,9 +1230,11 @@ class AgentService:
                 "",
                 f"## Current time: {_today_str} ({_weekday_cn})",
                 f"## Last trading day: {_last_trading_day}",
-                "Quote data is from the last trading day's close. When describing data, "
-                "say '上一交易日' or the specific date — never say '昨日' (may be inaccurate "
-                "due to weekends/holidays). Output in Chinese.",
+                (
+                    "Quote data is from the last trading day's close. When describing data, "
+                    "say '上一交易日' or the specific date — never say '昨日' (may be inaccurate "
+                    "due to weekends/holidays). Output in Chinese."
+                ),
             ]
         )
 
@@ -1248,9 +1250,11 @@ class AgentService:
             parts.extend(
                 [
                     "",
-                    "Your training data cutoff is before today. Any information about company "
-                    "news, earnings, or announcements may be outdated. You MUST use tools to "
-                    "fetch current data — never rely on your memory.",
+                    (
+                        "Your training data cutoff is before today. Any information about company "
+                        "news, earnings, or announcements may be outdated. You MUST use tools to "
+                        "fetch current data — never rely on your memory."
+                    ),
                 ]
             )
 
@@ -1260,19 +1264,29 @@ class AgentService:
                 [
                     "",
                     "## Data Accuracy Iron Rules (highest priority)",
-                    "- **Never fabricate any numbers**: prices, change%, volume, capital flow, "
-                    "target price, stop-loss — all values must come from tool-returned real-time data. "
-                    "Never give specific numbers from memory or speculation.",
-                    "- **Call tools first, then reference data**: before calling get_realtime_quote, "
-                    "you must NOT mention any specific stock price or change% in your reply. "
-                    "**Key: do not write any analysis outside tool_call tags. Output all tool_calls first, "
-                    "then write analysis after receiving tool_results.**",
-                    "- **Stop-loss must be below current price**: if a long recommendation has "
-                    "stop-loss >= current price, the analysis is wrong — fix it.",
-                    "- **Target price must be reasonable**: must not deviate from current price "
-                    "by more than ±30% (main board) or ±40% (ChiNext/STAR).",
-                    "- **Change% description must match data**: never describe positive gains as "
-                    "drops, or small fluctuations as limit-up/limit-down.",
+                    (
+                        "- **Never fabricate any numbers**: prices, change%, volume, capital flow, "
+                        "target price, stop-loss — all values must come from tool-returned real-time data. "
+                        "Never give specific numbers from memory or speculation."
+                    ),
+                    (
+                        "- **Call tools first, then reference data**: before calling get_realtime_quote, "
+                        "you must NOT mention any specific stock price or change% in your reply. "
+                        "**Key: do not write any analysis outside tool_call tags. Output all tool_calls first, "
+                        "then write analysis after receiving tool_results.**"
+                    ),
+                    (
+                        "- **Stop-loss must be below current price**: if a long recommendation has "
+                        "stop-loss >= current price, the analysis is wrong — fix it."
+                    ),
+                    (
+                        "- **Target price must be reasonable**: must not deviate from current price "
+                        "by more than ±30% (main board) or ±40% (ChiNext/STAR)."
+                    ),
+                    (
+                        "- **Change% description must match data**: never describe positive gains as "
+                        "drops, or small fluctuations as limit-up/limit-down."
+                    ),
                     "- If data is unavailable, clearly tell the user '该数据暂不可用' — never fabricate.",
                 ]
             )
@@ -1304,17 +1318,23 @@ class AgentService:
                     "",
                     "**Preferred tool for stock analysis is deep_analyze.**",
                     "",
-                    "⚠️ **First reply: output tool_call tags ONLY — no analysis text.** "
-                    "Write analysis only after tool_results come back.",
+                    (
+                        "⚠️ **First reply: output tool_call tags ONLY — no analysis text.** "
+                        "Write analysis only after tool_results come back."
+                    ),
                     "",
                     "**Primary path (recommended):**",
-                    "Step 1: Call deep_analyze(symbol=...) — single call that returns a full "
-                    "15+ dimension snapshot (quotes, capital flow, intel, quant signals, "
-                    "VWAP/VPIN, multi-timeframe, reflexivity, sentiment cycle, portfolio, "
-                    "risk, macro, geopolitical, thesis) plus a structured investment decision. "
-                    "The returned snapshot_text contains all data you need.",
-                    "Step 2: Write analysis based on the complete data from deep_analyze. "
-                    "If you need the latest breaking news, supplement with search_intel or web_search.",
+                    (
+                        "Step 1: Call deep_analyze(symbol=...) — single call that returns a full "
+                        "15+ dimension snapshot (quotes, capital flow, intel, quant signals, "
+                        "VWAP/VPIN, multi-timeframe, reflexivity, sentiment cycle, portfolio, "
+                        "risk, macro, geopolitical, thesis) plus a structured investment decision. "
+                        "The returned snapshot_text contains all data you need."
+                    ),
+                    (
+                        "Step 2: Write analysis based on the complete data from deep_analyze. "
+                        "If you need the latest breaking news, supplement with search_intel or web_search."
+                    ),
                     "",
                     "**Fallback path (only when deep_analyze is unavailable):**",
                     "Step 1: Call get_realtime_quote for real-time quotes",
@@ -1322,15 +1342,19 @@ class AgentService:
                     "Step 3: Call get_fund_flow for capital flow data",
                     "Step 4: Analyze based on **real data** from tool results",
                     "",
-                    "⚠️ **Never write news-based analysis without first calling "
-                    "search_intel and/or web_search.** "
-                    "Your training data news is outdated — you must use tools for current info.",
+                    (
+                        "⚠️ **Never write news-based analysis without first calling "
+                        "search_intel and/or web_search.** "
+                        "Your training data news is outdated — you must use tools for current info."
+                    ),
                     "",
-                    "- Do not retry search_intel more than 2 times if empty. "
-                    "web_search is only for searching latest news, announcements, reports — "
-                    "NOT for market data. "
-                    "⚠️ Never use web_search for stock prices, volume, change%, capital flow "
-                    "— market data must come from deep_analyze/get_realtime_quote system tools.",
+                    (
+                        "- Do not retry search_intel more than 2 times if empty. "
+                        "web_search is only for searching latest news, announcements, reports — "
+                        "NOT for market data. "
+                        "⚠️ Never use web_search for stock prices, volume, change%, capital flow "
+                        "— market data must come from deep_analyze/get_realtime_quote system tools."
+                    ),
                 ]
             )
         elif request_type == "trade_decision":
@@ -1338,17 +1362,23 @@ class AgentService:
                 [
                     "",
                     "## Tool Usage",
-                    "- **Preferred**: Call deep_analyze(symbol=...) for full snapshot + "
-                    "structured decision (includes portfolio, risk gates, Bayesian posterior, "
-                    "convergence score, and all context needed for a trade decision)",
+                    (
+                        "- **Preferred**: Call deep_analyze(symbol=...) for full snapshot + "
+                        "structured decision (includes portfolio, risk gates, Bayesian posterior, "
+                        "convergence score, and all context needed for a trade decision)"
+                    ),
                     "- If you need to verify holding details: call get_portfolio",
                     "- If you need breaking news: call search_intel",
-                    "⚠️ **First reply: output tool_calls only, no analysis.** "
-                    "Write analysis after tool_results.",
+                    (
+                        "⚠️ **First reply: output tool_calls only, no analysis.** "
+                        "Write analysis after tool_results."
+                    ),
                     "",
                     "## Debate Trigger Rule",
-                    "When your confidence is between 0.4-0.7, "
-                    "you MUST call run_debate tool for bull/bear debate.",
+                    (
+                        "When your confidence is between 0.4-0.7, "
+                        "you MUST call run_debate tool for bull/bear debate."
+                    ),
                 ]
             )
         elif request_type == "portfolio_review":
@@ -1373,12 +1403,16 @@ class AgentService:
                     "",
                     "最后给出整体组合评估：集中度、行业暴露、总风险",
                     "",
-                    "⚠️ **First reply: output tool_calls only, no analysis.** "
-                    "Write analysis after tool_results.",
+                    (
+                        "⚠️ **First reply: output tool_calls only, no analysis.** "
+                        "Write analysis after tool_results."
+                    ),
                     "",
                     "## Debate Trigger Rule",
-                    "When your confidence is between 0.4-0.7, "
-                    "you MUST call run_debate tool for bull/bear debate.",
+                    (
+                        "When your confidence is between 0.4-0.7, "
+                        "you MUST call run_debate tool for bull/bear debate."
+                    ),
                 ]
             )
         elif request_type == "market_overview":
@@ -1388,8 +1422,10 @@ class AgentService:
                     "## Tool Usage",
                     "- Call get_market_overview for broad market data",
                     "- If needed, call get_global_markets for global markets",
-                    "⚠️ **First reply: output tool_calls only, no analysis.** "
-                    "Write analysis after tool_results.",
+                    (
+                        "⚠️ **First reply: output tool_calls only, no analysis.** "
+                        "Write analysis after tool_results."
+                    ),
                 ]
             )
 
@@ -1409,12 +1445,14 @@ class AgentService:
                 parts.extend(
                     [
                         "- stock_analysis: 个股分析结果",
-                        "  props: title(可选,如'贵州茅台分析'), symbol, "
-                        "signal(bullish/bearish/neutral), "
-                        "confidence(0~1), summary(支持 Markdown，"
-                        "完整分析内容写在这里), "
-                        "dimensions(数组,每项含 key/label/signal/score/reasoning), "
-                        "risk_warnings(字符串数组)",
+                        (
+                            "  props: title(可选,如'贵州茅台分析'), symbol, "
+                            "signal(bullish/bearish/neutral), "
+                            "confidence(0~1), summary(支持 Markdown，"
+                            "完整分析内容写在这里), "
+                            "dimensions(数组,每项含 key/label/signal/score/reasoning), "
+                            "risk_warnings(字符串数组)"
+                        ),
                     ]
                 )
             if request_type in ("stock_analysis", "trade_decision"):
@@ -1426,30 +1464,36 @@ class AgentService:
                 parts.extend(
                     [
                         "- market_overview: 市场概览",
-                        "  props: title(如'市场简报'), "
-                        "signal(bullish/bearish/neutral), "
-                        "confidence(0~1), summary(支持 Markdown，"
-                        "将完整市场分析写在 summary 中，"
-                        "可以使用标题/列表/加粗等格式), "
-                        "dimensions(可选), risk_warnings(可选)",
+                        (
+                            "  props: title(如'市场简报'), "
+                            "signal(bullish/bearish/neutral), "
+                            "confidence(0~1), summary(支持 Markdown，"
+                            "将完整市场分析写在 summary 中，"
+                            "可以使用标题/列表/加粗等格式), "
+                            "dimensions(可选), risk_warnings(可选)"
+                        ),
                     ]
                 )
             if request_type in ("portfolio_review", "stock_analysis"):
                 parts.extend(
                     [
                         "- portfolio_summary: 持仓概览",
-                        "  props: title(如'持仓诊断'), signal, confidence, "
-                        "summary(支持 Markdown), "
-                        "dimensions(可选), risk_warnings(可选)",
+                        (
+                            "  props: title(如'持仓诊断'), signal, confidence, "
+                            "summary(支持 Markdown), "
+                            "dimensions(可选), risk_warnings(可选)"
+                        ),
                     ]
                 )
             parts.extend(
                 [
                     "",
-                    "**Important**: stock_analysis/market_overview/portfolio_summary "
-                    "summary fields support full Markdown. "
-                    "Write all detailed analysis in summary — don't truncate. "
-                    "Use ## headings, - lists, **bold** formatting.",
+                    (
+                        "**Important**: stock_analysis/market_overview/portfolio_summary "
+                        "summary fields support full Markdown. "
+                        "Write all detailed analysis in summary — don't truncate. "
+                        "Use ## headings, - lists, **bold** formatting."
+                    ),
                 ]
             )
 
@@ -1459,54 +1503,74 @@ class AgentService:
                 [
                     "",
                     "## Trade Decision Output Spec",
-                    "When recommending buy/sell on a specific stock, "
-                    "you **must** output a trade_decision Rich Card:",
-                    "- Must first call get_realtime_quote for latest price — "
-                    "price field **must use tool-returned real-time price**, never fabricate",
+                    (
+                        "When recommending buy/sell on a specific stock, "
+                        "you **must** output a trade_decision Rich Card:"
+                    ),
+                    (
+                        "- Must first call get_realtime_quote for latest price — "
+                        "price field **must use tool-returned real-time price**, never fabricate"
+                    ),
                     "- shares must be a multiple of 100",
-                    "- **On buy**: shares × price **must not exceed** user's available capital "
-                    "(see user capital config). "
-                    "If capital is insufficient for 100 shares, don't output trade_decision — "
-                    "explain insufficient funds in text",
-                    "- **On sell**: must first call get_portfolio to confirm holdings — "
-                    "shares **must not exceed** user's actual holding quantity. "
-                    "If not held, don't recommend selling",
+                    (
+                        "- **On buy**: shares × price **must not exceed** user's available capital "
+                        "(see user capital config). "
+                        "If capital is insufficient for 100 shares, don't output trade_decision — "
+                        "explain insufficient funds in text"
+                    ),
+                    (
+                        "- **On sell**: must first call get_portfolio to confirm holdings — "
+                        "shares **must not exceed** user's actual holding quantity. "
+                        "If not held, don't recommend selling"
+                    ),
                     "- Must include stop_loss (must be < price, i.e. below current price)",
                     "- Must include risks (at least 1 risk warning)",
                     "- Must include reasoning (trade rationale)",
                     "- Must include confidence (float 0-1)",
-                    "- Recommended: key_metrics array, each with label, value, "
-                    "signal(bullish/bearish/neutral)",
-                    "- Recommended: dimensions array, each with label (e.g. '技术面'), "
-                    "signal(bullish/bearish/neutral), score(0-1)",
+                    (
+                        "- Recommended: key_metrics array, each with label, value, "
+                        "signal(bullish/bearish/neutral)"
+                    ),
+                    (
+                        "- Recommended: dimensions array, each with label (e.g. '技术面'), "
+                        "signal(bullish/bearish/neutral), score(0-1)"
+                    ),
                     "",
                     "## Consistency Rule (CRITICAL)",
-                    "- If your analysis concludes HOLD or WATCH, do **NOT** output a "
-                    "trade_decision card — only describe your view in text",
-                    "- If you output both stock_analysis and trade_decision cards for the "
-                    "same stock, the trade_decision action **MUST** be consistent with "
-                    "the stock_analysis recommendation. Never recommend SELL in "
-                    "trade_decision when your analysis says HOLD/BUY, or vice versa",
-                    "- Only output trade_decision for actionable signals: BUY, ADD, "
-                    "REDUCE, or SELL — never for HOLD or WATCH",
+                    (
+                        "- If your analysis concludes HOLD or WATCH, do **NOT** output a "
+                        "trade_decision card — only describe your view in text"
+                    ),
+                    (
+                        "- If you output both stock_analysis and trade_decision cards for the "
+                        "same stock, the trade_decision action **MUST** be consistent with "
+                        "the stock_analysis recommendation. Never recommend SELL in "
+                        "trade_decision when your analysis says HOLD/BUY, or vice versa"
+                    ),
+                    (
+                        "- Only output trade_decision for actionable signals: BUY, ADD, "
+                        "REDUCE, or SELL — never for HOLD or WATCH"
+                    ),
                     "",
                     "示例：",
-                    '<!--RICH_CARDS:[{"type":"trade_decision",'
-                    '"props":{"symbol":"600519",'
-                    '"stock_name":"贵州茅台","action":"buy",'
-                    '"shares":100,"price":1680.5,'
-                    '"reasoning":"...","stop_loss":1600,"risks":["..."],'
-                    '"confidence":0.72,'
-                    '"key_metrics":[{"label":"5日涨幅",'
-                    '"value":"+3.2%","signal":"bullish"},'
-                    '{"label":"主力资金",'
-                    '"value":"净流入1.2亿","signal":"bullish"}],'
-                    '"dimensions":[{"label":"技术面",'
-                    '"signal":"bullish","score":0.75},'
-                    '{"label":"资金面",'
-                    '"signal":"bullish","score":0.68},'
-                    '{"label":"消息面",'
-                    '"signal":"neutral","score":0.5}]}}]-->',
+                    (
+                        '<!--RICH_CARDS:[{"type":"trade_decision",'
+                        '"props":{"symbol":"600519",'
+                        '"stock_name":"贵州茅台","action":"buy",'
+                        '"shares":100,"price":1680.5,'
+                        '"reasoning":"...","stop_loss":1600,"risks":["..."],'
+                        '"confidence":0.72,'
+                        '"key_metrics":[{"label":"5日涨幅",'
+                        '"value":"+3.2%","signal":"bullish"},'
+                        '{"label":"主力资金",'
+                        '"value":"净流入1.2亿","signal":"bullish"}],'
+                        '"dimensions":[{"label":"技术面",'
+                        '"signal":"bullish","score":0.75},'
+                        '{"label":"资金面",'
+                        '"signal":"bullish","score":0.68},'
+                        '{"label":"消息面",'
+                        '"signal":"neutral","score":0.5}]}}]-->'
+                    ),
                 ]
             )
 
@@ -1530,9 +1594,11 @@ class AgentService:
             [
                 "",
                 "## Disclaimer",
-                "⚠ The above analysis is for research and learning purposes only — "
-                "it does not constitute investment advice. Stock markets carry risk. "
-                "Make independent decisions based on your own risk tolerance.",
+                (
+                    "⚠ The above analysis is for research and learning purposes only — "
+                    "it does not constitute investment advice. Stock markets carry risk. "
+                    "Make independent decisions based on your own risk tolerance."
+                ),
             ]
         )
 
@@ -2338,17 +2404,21 @@ class AgentService:
         lines = [
             "## Available Tools",
             "",
-            "You have access to the following tools. To call a tool, output a "
-            "JSON block wrapped in <tool_call> tags:",
+            (
+                "You have access to the following tools. To call a tool, output a "
+                "JSON block wrapped in <tool_call> tags:"
+            ),
             "",
             "```",
             '<tool_call>{"name": "tool_name", "input": {"param": "value"}}</tool_call>',
             "```",
             "",
-            "You may call multiple DIFFERENT tools in a single response. "
-            "NEVER repeat the same tool call — each tool_call must be unique. "
-            "After all tool results are returned, provide your final answer "
-            "WITHOUT any tool_call tags.",
+            (
+                "You may call multiple DIFFERENT tools in a single response. "
+                "NEVER repeat the same tool call — each tool_call must be unique. "
+                "After all tool results are returned, provide your final answer "
+                "WITHOUT any tool_call tags."
+            ),
             "",
             "### Tool Definitions",
             "",

@@ -42,11 +42,13 @@ class TestWatchlistCRUD:
 
     def test_remove(self, svc: WatchlistService) -> None:
         svc.add("600519", "贵州茅台")
-        assert svc.remove("600519") is True
+        removed = svc.remove("600519")
+        assert removed is True
         assert svc.list_all() == []
 
     def test_remove_nonexistent(self, svc: WatchlistService) -> None:
-        assert svc.remove("999999") is False
+        removed = svc.remove("999999")
+        assert removed is False
 
     def test_bulk_replace(self, svc: WatchlistService) -> None:
         svc.add("600519", "贵州茅台")

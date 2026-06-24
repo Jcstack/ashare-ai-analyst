@@ -40,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["agent"])
 
+_GENERIC_ERROR_MESSAGE = "AI分析服务暂时不可用，请稍后再试"
+
 _DATA_FETCH_SEMAPHORE = asyncio.Semaphore(8)
 _DATA_FETCH_TIMEOUT = 30  # seconds per individual data fetch
 _MIN_QUALITY_FOR_ANALYSIS = 30
@@ -197,11 +199,11 @@ async def get_ai_analysis(
         )
         return result
     except Exception as exc:
-        logger.error("AI analysis failed for %s: %s", symbol, exc)
+        logger.exception("AI analysis failed for %s", symbol)
         return {
             "status": "error",
             "symbol": symbol,
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
             "error_type": type(exc).__name__,
         }
 
@@ -299,12 +301,12 @@ async def get_unified_analysis(
             logger.debug("Evaluator skipped for %s", symbol)
 
         return result
-    except Exception as exc:
-        logger.error("Unified analysis failed for %s: %s", symbol, exc)
+    except Exception:
+        logger.exception("Unified analysis failed for %s", symbol)
         return {
             "status": "error",
             "symbol": symbol,
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
             "action": "watch",
             "action_label": "建议观望",
             "confidence": {"score": 0.0, "label": "", "basis": []},
@@ -366,13 +368,13 @@ async def get_quick_insight(
             sector_info=sector_info,
         )
         return result
-    except Exception as exc:
-        logger.error("Quick insight failed for %s: %s", symbol, exc)
+    except Exception:
+        logger.exception("Quick insight failed for %s", symbol)
         return {
             "symbol": symbol,
             "signal": "neutral",
             "confidence": 0.0,
-            "summary": f"分析暂不可用: {exc}",
+            "summary": "分析暂不可用，请稍后再试",
             "risk_badge": "medium",
         }
 
@@ -405,11 +407,11 @@ async def trigger_fresh_analysis(
         )
         return result
     except Exception as exc:
-        logger.error("Fresh analysis failed for %s: %s", symbol, exc)
+        logger.exception("Fresh analysis failed for %s", symbol)
         return {
             "status": "error",
             "symbol": symbol,
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
             "error_type": type(exc).__name__,
         }
 
@@ -485,10 +487,10 @@ async def get_market_ai_overview(
         )
         return result
     except Exception as exc:
-        logger.error("Market AI overview failed: %s", exc)
+        logger.exception("Market AI overview failed")
         return {
             "status": "error",
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
             "error_type": type(exc).__name__,
         }
 
@@ -540,12 +542,12 @@ async def analyze_stock_move(
         )
         return result
     except Exception as exc:
-        logger.error("Move analysis failed for %s: %s", symbol, exc)
+        logger.exception("Move analysis failed for %s", symbol)
         return {
             "status": "error",
             "symbol": symbol,
             "name": symbol,
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
             "error_type": type(exc).__name__,
         }
 
@@ -603,11 +605,11 @@ async def get_dragon_tiger_ai(
         )
         return result
     except Exception as exc:
-        logger.error("Dragon tiger AI failed for %s: %s", symbol, exc)
+        logger.exception("Dragon tiger AI failed for %s", symbol)
         return {
             "status": "error",
             "symbol": symbol,
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
             "error_type": type(exc).__name__,
         }
 

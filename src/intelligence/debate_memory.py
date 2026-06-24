@@ -15,7 +15,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -303,12 +303,9 @@ class DebateMemory:
 
     def cleanup(self, max_age_days: int = 90) -> int:
         """Remove debate records older than max_age_days."""
-        cutoff = datetime.now(UTC).isoformat()[:10]
-        # Simple date-prefix comparison (ISO format sorts correctly)
-        from datetime import timedelta
-
-        cutoff_dt = datetime.now(UTC) - timedelta(days=max_age_days)
-        cutoff = cutoff_dt.isoformat()
+        # ISO-format timestamps sort lexicographically, so a string compare
+        # against the cutoff is correct for the created_at column.
+        cutoff = (datetime.now(UTC) - timedelta(days=max_age_days)).isoformat()
 
         with self._conn() as conn:
             # Delete reflections first (FK)

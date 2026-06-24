@@ -70,7 +70,7 @@ class TestSSEEvent:
 
     def test_all_event_types(self):
         """All event types should be formattable."""
-        for event_type in SSEEventType:
+        for event_type in list(SSEEventType):
             event = SSEEvent(event_type=event_type, data={"test": True})
             formatted = event.format()
             assert f"event: {event_type.value}\n" in formatted

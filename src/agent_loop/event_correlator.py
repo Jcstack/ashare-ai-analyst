@@ -192,10 +192,9 @@ class EventCorrelator:
         # 2 types -> 0.1, 3 types -> 0.25, 4+ types -> 0.4
         boost = min(0.5, (n_types - 1) * 0.15)
 
-        # Small additional boost from average severity
-        if n_types > 0:
-            avg_sev = total_severity / max(n_types, 1)
-            boost += avg_sev * 0.1
+        # Small additional boost from average severity (n_types >= 2 here).
+        avg_sev = total_severity / n_types
+        boost += avg_sev * 0.1
 
         return min(0.5, round(boost, 3))
 

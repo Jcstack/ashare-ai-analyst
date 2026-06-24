@@ -1299,7 +1299,8 @@ class DecisionPipeline:
         else:
             new_value = existing_value
 
-        weight_after = new_value / total_value if total_value > 0 else 0
+        # total_value > 0 is guaranteed by the earlier `total_value <= 0` return.
+        weight_after = new_value / total_value
         position_count = len(portfolio) + (
             1 if action == "buy" and existing_value == 0 else 0
         )
