@@ -108,6 +108,11 @@ class PortfolioStore:
             ValueError: If ``validate_capital`` is True and the user has
                 insufficient cash to cover ``shares * cost_price + commission``.
         """
+        # Normalize symbol: strip exchange suffix (000983.SZ → 000983)
+        import re as _re
+
+        symbol = _re.sub(r"\.(SZ|SH|BJ)$", "", symbol, flags=_re.IGNORECASE).strip()
+
         if validate_capital and self._capital is not None:
             from src.web.services.capital_service import calculate_commission
 
@@ -136,8 +141,8 @@ class PortfolioStore:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO portfolio_positions "
-                "(id, symbol, name, board, cost_price, shares, buy_date, note, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, symbol, name, board, cost_price, shares, today_bought, buy_date, note, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     position_id,
                     symbol,
@@ -145,6 +150,7 @@ class PortfolioStore:
                     board,
                     round(cost_price, 2),
                     shares,
+                    shares,  # today_bought = all shares are new today
                     buy_date,
                     note,
                     now,
@@ -173,6 +179,7 @@ class PortfolioStore:
             "board",
             "cost_price",
             "shares",
+            "today_bought",
             "buy_date",
             "note",
         }
@@ -273,6 +280,21 @@ class PortfolioStore:
 
         logger.info("Portfolio bulk-saved: %d positions", len(positions))
 
+    def reset_today_bought(self) -> int:
+        """Reset ``today_bought`` to 0 for all positions.
+
+        Called at start of each trading day so yesterday's buys become sellable.
+        Returns the number of positions that were reset.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE portfolio_positions SET today_bought = 0 WHERE today_bought > 0"
+            )
+        count = cursor.rowcount
+        if count:
+            logger.info("Reset today_bought for %d positions", count)
+        return count
+
     # ------------------------------------------------------------------
     # Migration
     # ------------------------------------------------------------------
@@ -348,6 +370,7 @@ class PortfolioStore:
             "board": row["board"],
             "cost_price": row["cost_price"],
             "shares": row["shares"],
+            "today_bought": row["today_bought"],
             "buy_date": row["buy_date"],
             "note": row["note"],
             "created_at": row["created_at"],
@@ -377,6 +400,7 @@ class PortfolioStore:
                     board TEXT NOT NULL DEFAULT 'main',
                     cost_price REAL NOT NULL,
                     shares INTEGER NOT NULL,
+                    today_bought INTEGER NOT NULL DEFAULT 0,
                     buy_date TEXT NOT NULL DEFAULT '',
                     note TEXT DEFAULT '',
                     created_at TEXT NOT NULL,
@@ -388,6 +412,19 @@ class PortfolioStore:
                 "CREATE INDEX IF NOT EXISTS idx_positions_symbol "
                 "ON portfolio_positions(symbol)"
             )
+            # Auto-migrate: add today_bought column if missing
+            cols = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(portfolio_positions)"
+                ).fetchall()
+            }
+            if "today_bought" not in cols:
+                conn.execute(
+                    "ALTER TABLE portfolio_positions "
+                    "ADD COLUMN today_bought INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.info("Migrated: added today_bought column")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS _migrations (

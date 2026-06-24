@@ -27,7 +27,7 @@ from src.utils.logger import get_logger
 
 logger = get_logger("llm.bridge")
 
-_DEFAULT_MODEL = "sonnet"
+_DEFAULT_MODEL = "opus"
 
 
 class ClaudeCodeBridgeProvider(BaseLLMProvider):
@@ -109,7 +109,8 @@ class ClaudeCodeBridgeProvider(BaseLLMProvider):
 
         Args:
             messages: Provider-neutral messages.
-            model: Ignored — bridge uses its own model config.
+            model: Claude Code model alias (e.g. ``"sonnet"``, ``"opus"``).
+                Falls back to the provider's default model if not provided.
             max_tokens: Ignored — bridge manages its own token limits.
             temperature: Ignored — bridge uses claude defaults.
             **kwargs: Absorbed silently (e.g. ``grounding``).
@@ -120,6 +121,7 @@ class ClaudeCodeBridgeProvider(BaseLLMProvider):
         Raises:
             LLMProviderError: On bridge connection, timeout, or HTTP error.
         """
+        effective_model = model or self._model
         system_prompt, user_message = self._format_messages(messages)
 
         start = time.perf_counter()
@@ -130,7 +132,7 @@ class ClaudeCodeBridgeProvider(BaseLLMProvider):
                     json={
                         "message": user_message,
                         "system_prompt": system_prompt,
-                        "model": self._model,
+                        "model": effective_model,
                     },
                 )
                 resp.raise_for_status()

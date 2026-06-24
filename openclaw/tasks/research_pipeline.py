@@ -12,12 +12,15 @@ import json
 import time
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from openclaw.celery_app import app
 from src.utils.config import load_config
 from src.utils.logger import get_logger
 
 logger = get_logger("openclaw.tasks.research_pipeline")
+
+_CST = ZoneInfo("Asia/Shanghai")
 
 
 def _should_execute(task_name: str) -> bool:
@@ -151,7 +154,7 @@ def task_research_aggregate(self) -> dict[str, Any]:
             logger.warning("No default symbols configured")
             return {"status": "ok", "signals": 0}
 
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_str = datetime.now(_CST).strftime("%Y-%m-%d")
         results = aggregator.aggregate(symbols, date_str)
 
         # Push notification with summary

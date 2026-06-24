@@ -134,6 +134,7 @@ class TestContentScorer:
             "domain_relevance",
             "quality_signals",
             "noise_penalty",
+            "sentiment_bonus",
         }
 
     def test_cross_verification_boost(self) -> None:

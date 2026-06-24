@@ -966,16 +966,6 @@ def _mock_intelligence_hub_service():
     return svc
 
 
-def _mock_recommendation_service():
-    """Mock RecommendationService to prevent writes to real data/recommendations.db."""
-    svc = MagicMock()
-    svc.get_latest.return_value = []
-    svc.get_recommendation.return_value = None
-    svc.get_performance.return_value = {}
-    svc.refresh.return_value = {"status": "ok", "count": 0}
-    return svc
-
-
 # ---------------------------------------------------------------------------
 # Full-app fixture
 # ---------------------------------------------------------------------------
@@ -1008,7 +998,6 @@ def app():
         get_prompt_tester,
         get_realtime_analyzer,
         get_realtime_quote_manager,
-        get_recommendation_service,
         get_redis,
         get_resonance_detector,
         get_sentinel_config_service,
@@ -1096,10 +1085,6 @@ def app():
     test_app.dependency_overrides[get_intelligence_hub_service] = (
         _mock_intelligence_hub_service
     )
-    test_app.dependency_overrides[get_recommendation_service] = (
-        _mock_recommendation_service
-    )
-
     yield test_app
 
     test_app.dependency_overrides.clear()

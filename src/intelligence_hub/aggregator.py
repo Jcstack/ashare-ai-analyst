@@ -22,6 +22,7 @@ from src.intelligence_hub.sources.reddit_source import RedditSource
 from src.intelligence_hub.sources.rss_source import RssSource
 
 if TYPE_CHECKING:
+    from src.intelligence.impact_engine import EventImpactEngine
     from src.intelligence_hub.dedup import DedupChecker
     from src.intelligence_hub.event_cluster import EventClusterer
     from src.intelligence_hub.scorer import ContentScorer
@@ -60,6 +61,7 @@ class InfoAggregator:
         social_guardrails: SocialGuardrails | None = None,
         event_clusterer: EventClusterer | None = None,
         symbol_extractor: SymbolExtractor | None = None,
+        impact_engine: EventImpactEngine | None = None,
     ) -> None:
         self._store = store
         self._config = config or {}
@@ -70,6 +72,7 @@ class InfoAggregator:
         self._guardrails = social_guardrails
         self._clusterer = event_clusterer
         self._symbol_extractor = symbol_extractor
+        self._impact_engine = impact_engine
         self._sources = self._build_sources()
         self._last_refresh: float = 0.0
         self._refresh_interval = self._config.get("refresh_interval_seconds", 300)
@@ -306,3 +309,40 @@ class InfoAggregator:
 
         logger.info("Refresh complete: %d new items", total_stored)
         return total_stored, new_ids
+
+    def process_event_impact(self, info_item: dict[str, Any]) -> list[dict[str, Any]]:
+        """Process an info item through causal chain analysis.
+
+        Routes the event through the EventImpactEngine to produce tradeable
+        signal evidence dicts for each affected stock.
+
+        Args:
+            info_item: Event dict with keys like title, summary, confidence,
+                sectors, etc.  Can also accept an InfoItem.to_dict() output.
+
+        Returns:
+            List of signal evidence dicts ready for SignalAggregator.
+        """
+        if self._impact_engine is None:
+            try:
+                from src.intelligence.causal_chain import CausalChainConstructor
+                from src.intelligence.impact_engine import EventImpactEngine
+
+                constructor = CausalChainConstructor()
+                self._impact_engine = EventImpactEngine(chain_constructor=constructor)
+            except Exception as exc:
+                logger.warning("Failed to initialize impact engine: %s", exc)
+                return []
+
+        try:
+            signals = self._impact_engine.process_event(info_item)
+            if signals:
+                logger.info(
+                    "Event impact analysis produced %d signals for '%s'",
+                    len(signals),
+                    str(info_item.get("title", ""))[:40],
+                )
+            return signals
+        except Exception as exc:
+            logger.warning("Event impact processing failed: %s", exc)
+            return []

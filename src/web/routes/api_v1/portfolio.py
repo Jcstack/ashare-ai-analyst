@@ -40,6 +40,96 @@ async def load_portfolio(
     return store.get_portfolio_data()
 
 
+@router.get("/portfolio/enriched")
+async def load_portfolio_enriched(
+    store: PortfolioStore = Depends(get_portfolio_store),
+) -> dict:
+    """Load portfolio enriched with realtime prices and P&L.
+
+    Returns positions with current_price, market_value, pnl, pnl_percent,
+    plus portfolio-level totals (total_cost, total_value, total_pnl).
+    Used by MCP tools so research threads can see actual P&L.
+    """
+    base = store.get_portfolio_data()
+    positions = base.get("positions", [])
+    if not positions:
+        return {
+            **base,
+            "total_cost": 0,
+            "total_market_value": 0,
+            "total_pnl": 0,
+            "total_pnl_percent": 0,
+        }
+
+    # Fetch realtime quotes for all held symbols
+    symbols = [p["symbol"] for p in positions]
+    price_map: dict[str, dict] = {}
+    try:
+        from src.data.realtime import RealtimeQuoteManager
+
+        rtm = RealtimeQuoteManager()
+        quotes_df = await asyncio.to_thread(rtm.get_quotes, symbols)
+        if not quotes_df.empty:
+            for _, row in quotes_df.iterrows():
+                price_map[row["symbol"]] = {
+                    "price": row.get("price"),
+                    "pct_change": row.get("pct_change"),
+                    "prev_close": row.get("prev_close"),
+                }
+    except Exception as exc:
+        logger.warning("Failed to fetch realtime quotes for portfolio: %s", exc)
+
+    # Enrich each position with P&L
+    total_cost = 0.0
+    total_value = 0.0
+    enriched = []
+    for p in positions:
+        cost_price = p.get("costPrice", 0)
+        shares = p.get("shares", 0)
+        position_cost = cost_price * shares
+        total_cost += position_cost
+
+        quote = price_map.get(p["symbol"], {})
+        current_price = quote.get("price")
+
+        if current_price and current_price > 0:
+            market_value = current_price * shares
+            pnl = market_value - position_cost
+            pnl_percent = (pnl / position_cost * 100) if position_cost > 0 else 0
+            total_value += market_value
+        else:
+            market_value = None
+            pnl = None
+            pnl_percent = None
+            total_value += position_cost  # fallback: use cost
+
+        enriched.append(
+            {
+                **p,
+                "currentPrice": current_price,
+                "todayChange": quote.get("pct_change"),
+                "marketValue": round(market_value, 2) if market_value else None,
+                "pnl": round(pnl, 2) if pnl is not None else None,
+                "pnlPercent": round(pnl_percent, 2)
+                if pnl_percent is not None
+                else None,
+            }
+        )
+
+    total_pnl = total_value - total_cost
+    total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+
+    return {
+        "version": base.get("version", 1),
+        "updatedAt": base.get("updatedAt", ""),
+        "positions": enriched,
+        "total_cost": round(total_cost, 2),
+        "total_market_value": round(total_value, 2),
+        "total_pnl": round(total_pnl, 2),
+        "total_pnl_percent": round(total_pnl_pct, 2),
+    }
+
+
 @router.put("/portfolio", response_model=ApiResponse)
 async def save_portfolio(
     req: PortfolioData,

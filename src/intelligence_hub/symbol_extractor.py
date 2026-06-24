@@ -146,12 +146,14 @@ class SymbolExtractor:
         """
         names: dict[str, str] = {}
 
-        # Try akshare first
+        # Try akshare first (via em_api_call for proxy support in Docker)
         if self._load_akshare:
             try:
                 import akshare as ak
 
-                df = ak.stock_info_a_code_name()
+                from src.data.eastmoney_proxy import em_api_call
+
+                df = em_api_call(ak.stock_info_a_code_name)
                 if df is not None and not df.empty:
                     for _, row in df.iterrows():
                         code = str(row.get("code", ""))

@@ -57,16 +57,37 @@ def _install_akshare_proxy_patch() -> bool:
         logger.debug("EastMoney proxy disabled in config")
         return False
 
-    gateway = proxy_cfg.get("gateway", "")
+    gateway = proxy_cfg.get("gateway", "101.201.173.125")
     token = os.environ.get("AKSHARE_PROXY_TOKEN", "")
 
     if not token:
         logger.warning("AKSHARE_PROXY_TOKEN not set, akshare-proxy-patch skipped")
         return False
 
+    retry = proxy_cfg.get("retry", 30)
+    hook_domains = proxy_cfg.get(
+        "hook_domains",
+        [
+            "fund.eastmoney.com",
+            "push2.eastmoney.com",
+            "push2his.eastmoney.com",
+            "emweb.securities.eastmoney.com",
+        ],
+    )
+
     try:
-        install_patch(gateway, token)
-        logger.info("akshare-proxy-patch installed (gateway=%s)", gateway)
+        install_patch(
+            gateway,
+            auth_token=token,
+            retry=retry,
+            hook_domains=hook_domains,
+        )
+        logger.info(
+            "akshare-proxy-patch installed (gateway=%s, token=%s..., domains=%d)",
+            gateway,
+            token[:8] if len(token) > 8 else token,
+            len(hook_domains),
+        )
         return True
     except Exception as exc:
         logger.warning("akshare-proxy-patch install failed: %s", exc)
@@ -77,9 +98,10 @@ def init_proxy_patch() -> bool:
     """Init EastMoney support at process startup.
 
     Called by ``src/web/app.py`` (lifespan) and ``openclaw/celery_app.py``.
-    Activates both the curl_cffi client AND the akshare-proxy-patch
-    proactively so all AKShare _em calls are routed through the gateway
-    from the first request (no cold-start timeout penalty).
+    Initialises the curl_cffi client but does NOT proactively activate
+    akshare-proxy-patch.  The patch is activated lazily by ``em_api_call()``
+    only when a direct EastMoney request fails — this avoids the proxy
+    overhead when direct access works (e.g. NO_PROXY covers .eastmoney.com).
 
     Returns True if at least one mode is available.
     """
@@ -98,11 +120,9 @@ def init_proxy_patch() -> bool:
     except Exception as exc:
         logger.debug("EastMoneyClient init skipped: %s", exc)
 
-    # Proactively activate akshare-proxy-patch so the first AKShare call
-    # doesn't have to fail and retry.  If token/package is missing this
-    # is a no-op and em_api_call will still try direct-then-lazy.
-    if activate_proxy_patch():
-        success = True
+    # akshare-proxy-patch is NOT activated here — em_api_call() will
+    # activate it lazily on the first direct-connection failure.
+    # This keeps the fast path (direct → 0.1s) when push2 is reachable.
 
     _initialized = True
     return success

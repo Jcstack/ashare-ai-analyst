@@ -78,12 +78,14 @@ _PIPELINE_HINTS: dict[str, list[str]] = {
 }
 
 _DYNAMIC_PLANNING_PROMPT = """\
-你是投资分析系统的编排器。根据用户意图，生成一个分析流水线。
+You are the orchestrator of an investment analysis system. Based on user intent, \
+generate an analysis pipeline.
+Write all output text in Chinese.
 
-## 可用 Agent
+## Available Agents
 {agent_list}
 
-## 输出格式（严格 JSON）
+## Output Format (strict JSON)
 ```json
 {{
   "name": "dynamic_{intent}",
@@ -102,13 +104,13 @@ _DYNAMIC_PLANNING_PROMPT = """\
 }}
 ```
 
-## 规则
-- data_qa 必须是第一步（无依赖），用于数据质量检查
-- 涉及交易建议时必须包含 risk 步骤
-- 涉及买卖执行时必须包含 exec_plan 步骤，且 exec_plan 必须在 risk 之后
-- 每个步骤的 input_filter 只写真正需要的字段名（上下文隔离）
-- require_all_outputs 必须包含：confidence_score, key_assumptions, failure_modes, data_lineage, data_gaps
-- 只返回 JSON，不要其他文字
+## Rules
+- data_qa must be the first step (no dependencies) — used for data quality checks
+- Trade recommendation pipelines must include a risk step
+- Buy/sell execution pipelines must include an exec_plan step, and exec_plan must come after risk
+- Each step's input_filter should list only the fields it actually needs (context isolation)
+- require_all_outputs must include: confidence_score, key_assumptions, failure_modes, data_lineage, data_gaps
+- Return only JSON — no other text
 """
 
 
@@ -262,7 +264,7 @@ class PipelinePlanner:
         )
 
         if ctx.get("symbol"):
-            system += f"\n\n用户关注的股票: {ctx['symbol']}"
+            system += f"\n\nUser's target stock: {ctx['symbol']}"
 
         messages = [
             LLMMessage(role="system", content=system),

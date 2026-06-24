@@ -43,10 +43,13 @@ class ReportAgent(BaseAgent):
         self._tools = tool_registry
         self._llm = llm_router
         self._system_role = system_role or (
-            "你是一位资深投资报告撰写专家。"
-            "基于多维度分析结果（技术面、舆情、regime、风控、回测）撰写综合分析报告。"
-            "必须包含三种情景分析（乐观/中性/悲观），每个情景标注概率和风险等级。"
-            "语言精炼、结论明确、风险警示到位。"
+            "You are a senior investment report writing specialist. "
+            "Synthesize multi-dimensional analysis results (technicals, sentiment, "
+            "regime, risk control, backtesting) into a comprehensive report. "
+            "Must include three scenario analyses (bullish/neutral/bearish), "
+            "each labeled with probability and risk level. "
+            "Be concise, state conclusions clearly, and ensure risk warnings are thorough. "
+            "Write all output text in Chinese."
         )
 
     async def _execute_impl(self, message: AgentMessage) -> AgentMessage:
@@ -62,7 +65,7 @@ class ReportAgent(BaseAgent):
             LLMMessage(role="system", content=system_prompt),
             LLMMessage(
                 role="user",
-                content=f"{message.task}\n\n## 分析数据汇总\n{context_summary}",
+                content=f"{message.task}\n\n## Analysis Data Summary\n{context_summary}",
             ),
         ]
 
@@ -109,7 +112,7 @@ class ReportAgent(BaseAgent):
         parts = [
             self._system_role,
             "",
-            "## 输出规范（JSON格式）",
+            "## Output Format (JSON)",
             "{",
             '  "report_markdown": "完整的 Markdown 报告文本",',
             '  "executive_summary": "一句话核心结论",',
@@ -124,15 +127,15 @@ class ReportAgent(BaseAgent):
             '  "data_gaps": ["..."]',
             "}",
             "",
-            "## 规则",
-            "- 三种情景概率之和必须 = 1.0",
-            "- 每个情景必须有具体的触发条件和影响分析",
-            "- 报告使用中文",
-            "- 不给出具体的买卖指令，只呈现分析和情景",
+            "## Rules",
+            "- The three scenario probabilities must sum to 1.0",
+            "- Each scenario must include specific trigger conditions and impact analysis",
+            "- The report must be written in Chinese",
+            "- Do not give specific buy/sell instructions — only present analysis and scenarios",
         ]
         symbol = message.context.get("symbol")
         if symbol:
-            parts.append(f"\n## 分析标的: {symbol}")
+            parts.append(f"\n## Analysis Target: {symbol}")
         return "\n".join(parts)
 
     @staticmethod
@@ -163,7 +166,7 @@ class ReportAgent(BaseAgent):
                     val = json.dumps(val, ensure_ascii=False)
                 parts.append(f"- **{key}**: {val}")
 
-        return "\n".join(parts) if parts else "（无可用分析数据）"
+        return "\n".join(parts) if parts else "(No analysis data available)"
 
     @staticmethod
     def _build_fallback_report(ctx: dict[str, Any]) -> str:

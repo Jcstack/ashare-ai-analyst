@@ -99,6 +99,30 @@ class PositionSizer:
         scale = target / realized_vol
         return min(scale, 2.0)
 
+    def conviction_multiplier(
+        self,
+        rr_ratio: float = 0.0,
+        confidence: float = 0.5,
+    ) -> float:
+        """Dynamic Kelly multiplier based on R/R ratio and confidence.
+
+        High R/R (>3) × high confidence (>0.8) → up to 2x Kelly.
+        Low R/R or low confidence → 0.5-1.0x.
+
+        Args:
+            rr_ratio: Reward/risk ratio (target upside / stop-loss downside).
+            confidence: Decision confidence (0-1).
+
+        Returns:
+            Multiplier (0.5 to 2.0) to apply to Kelly fraction.
+        """
+        if rr_ratio <= 0 or confidence <= 0:
+            return 0.5
+
+        # Base: (rr / 2.0) * (conf / 0.7), capped at 2.0
+        raw = (rr_ratio / 2.0) * (confidence / 0.7)
+        return max(0.5, min(2.0, round(raw, 2)))
+
     def calculate_size(
         self,
         symbol: str,
@@ -109,6 +133,8 @@ class PositionSizer:
         avg_loss: float = 0.03,
         realized_vol: float | None = None,
         returns: np.ndarray | None = None,
+        rr_ratio: float = 0.0,
+        current_confidence: float = 0.5,
     ) -> SizingResult:
         """Calculate recommended position size for a stock.
 
@@ -121,14 +147,21 @@ class PositionSizer:
             avg_loss: Average losing return magnitude (positive, e.g., 0.03 = 3%).
             realized_vol: Annualized realized volatility. If None, computed from returns.
             returns: Daily returns array for volatility computation.
+            rr_ratio: Current decision's reward/risk ratio.
+            current_confidence: Current decision's confidence (0-1).
         """
         warnings: list[str] = []
 
         # 1. Kelly criterion
         kelly_raw = self.kelly_criterion(win_rate, avg_win, avg_loss)
 
-        # Scale Kelly by conservative fraction
-        kelly_scaled = kelly_raw * self.config.kelly_fraction
+        # Scale Kelly by conservative fraction × conviction multiplier
+        conv_mult = self.conviction_multiplier(rr_ratio, current_confidence)
+        kelly_scaled = kelly_raw * self.config.kelly_fraction * conv_mult
+        if conv_mult != 1.0:
+            warnings.append(
+                f"信念乘数 {conv_mult:.1f}x (R/R={rr_ratio:.1f}, 信心={current_confidence:.0%})"
+            )
 
         # 2. Volatility scaling
         if realized_vol is None and returns is not None:

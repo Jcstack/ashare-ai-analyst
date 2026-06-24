@@ -54,25 +54,26 @@ class StrategyLabService:
         """
         from src.web.dependencies import get_llm_gateway
 
-        prompt = f"""你是A股量化策略专家。用户用自然语言描述了一个交易策略，请解析为系统可执行的策略配置。
+        prompt = f"""You are an A-share quantitative strategy expert. The user described a \
+trading strategy in natural language. Parse it into an executable strategy configuration.
 
-用户描述: "{description}"
-{f"目标股票: {symbol}" if symbol else ""}
+All text values in the JSON output must be in Chinese.
 
-可用策略类型:
-1. trend_following (趋势跟踪): 参数 fast_ma(2-30), slow_ma(10-120), volume_threshold(1.0-5.0)
-2. mean_reversion (均值回归): 参数 bb_period(10-50), bb_std(1.0-4.0), rsi_period(5-30), rsi_oversold(10-40), rsi_overbought(60-90)
-3. momentum (动量策略): 参数 roc_period(5-30), rsi_period(5-30), rsi_threshold(30-70), volume_surge_threshold(1.0-5.0)
+User description: "{description}"
+{f"Target stock: {symbol}" if symbol else ""}
 
-请返回JSON格式:
+Available strategy types:
+1. trend_following (趋势跟踪): params fast_ma(2-30), slow_ma(10-120), volume_threshold(1.0-5.0)
+2. mean_reversion (均值回归): params bb_period(10-50), bb_std(1.0-4.0), rsi_period(5-30), rsi_oversold(10-40), rsi_overbought(60-90)
+3. momentum (动量策略): params roc_period(5-30), rsi_period(5-30), rsi_threshold(30-70), volume_surge_threshold(1.0-5.0)
+
+Return JSON only, no other content:
 {{
   "strategy_key": "策略类型key",
   "params": {{"参数名": 值}},
   "explanation": "策略解读(中文，2-3句话)",
   "confidence": 0.0-1.0
-}}
-
-只返回JSON，不要其他内容。"""
+}}"""
 
         try:
             router = get_llm_gateway()
@@ -138,27 +139,29 @@ class StrategyLabService:
         """
         from src.web.dependencies import get_llm_gateway
 
-        prompt = f"""你是A股量化策略调优专家。请根据当前回测结果，建议参数优化方案。
+        prompt = f"""You are an A-share quantitative strategy tuning expert. Based on the \
+current backtest results, suggest parameter optimizations.
 
-股票: {symbol}
-策略: {strategy_key}
-当前参数: {json.dumps(current_params, ensure_ascii=False)}
-当前绩效:
-- 总收益率: {current_metrics.get("total_return", 0):.2%}
-- 年化收益: {current_metrics.get("annual_return", 0):.2%}
-- 夏普比率: {current_metrics.get("sharpe_ratio", 0):.4f}
-- 最大回撤: {current_metrics.get("max_drawdown", 0):.2%}
-- 胜率: {current_metrics.get("win_rate", 0):.2%}
-- 交易次数: {current_metrics.get("total_trades", 0)}
+All text values in the JSON output must be in Chinese.
 
-请分析当前策略的问题，并建议参数调整。返回JSON:
+Stock: {symbol}
+Strategy: {strategy_key}
+Current params: {json.dumps(current_params, ensure_ascii=False)}
+Current performance:
+- Total return: {current_metrics.get("total_return", 0):.2%}
+- Annualized return: {current_metrics.get("annual_return", 0):.2%}
+- Sharpe ratio: {current_metrics.get("sharpe_ratio", 0):.4f}
+- Max drawdown: {current_metrics.get("max_drawdown", 0):.2%}
+- Win rate: {current_metrics.get("win_rate", 0):.2%}
+- Total trades: {current_metrics.get("total_trades", 0)}
+
+Analyze the current strategy's weaknesses and suggest parameter adjustments. \
+Return JSON only, no other content:
 {{
   "suggested_params": {{"参数名": 建议值}},
   "reasoning": ["原因1", "原因2", ...],
   "param_explanations": {{"参数名": "调整理由"}}
-}}
-
-只返回JSON，不要其他内容。"""
+}}"""
 
         try:
             router = get_llm_gateway()
@@ -226,23 +229,26 @@ class StrategyLabService:
         else:
             rt_summary = "无交易记录。"
 
-        prompt = f"""你是A股回测归因分析专家。请对以下回测结果进行深度归因分析。
+        prompt = f"""You are an A-share backtest attribution analysis expert. Perform a deep \
+attribution analysis on the following backtest results.
 
-股票: {symbol}
-策略: {strategy_name}
+All text values in the JSON output must be in Chinese.
 
-绩效概览:
-- 总收益率: {metrics.get("total_return", 0):.2%}
-- 夏普比率: {metrics.get("sharpe_ratio", 0):.4f}
-- 最大回撤: {metrics.get("max_drawdown", 0):.2%}
-- 胜率: {metrics.get("win_rate", 0):.2%}
+Stock: {symbol}
+Strategy: {strategy_name}
 
-交易概览: {rt_summary}
+Performance overview:
+- Total return: {metrics.get("total_return", 0):.2%}
+- Sharpe ratio: {metrics.get("sharpe_ratio", 0):.4f}
+- Max drawdown: {metrics.get("max_drawdown", 0):.2%}
+- Win rate: {metrics.get("win_rate", 0):.2%}
 
-近期交易记录(最近5笔):
-{json.dumps(round_trips[-5:], ensure_ascii=False, default=str) if round_trips else "无"}
+Trade overview: {rt_summary}
 
-请返回JSON:
+Recent trades (last 5):
+{json.dumps(round_trips[-5:], ensure_ascii=False, default=str) if round_trips else "None"}
+
+Return JSON only, no other content:
 {{
   "summary": "归因分析总结(2-3句话)",
   "key_findings": ["关键发现1", "关键发现2", ...],
@@ -250,9 +256,7 @@ class StrategyLabService:
   "loss_factors": ["亏损因素1", ...],
   "improvement_suggestions": ["优化建议1", ...],
   "risk_assessment": "风险评估(1-2句话)"
-}}
-
-只返回JSON，不要其他内容。"""
+}}"""
 
         try:
             router = get_llm_gateway()

@@ -1,5 +1,10 @@
-# Broker configuration — simulation-first default
+# Broker configuration
 # Mode: simulation (default) | qmt (XtQuant live) | live (generic stub)
+#
+# Current workflow (discord_execute):
+#   Agent decides buy/sell → Discord push with execution instructions
+#   → User executes on broker app → Replies "买了X股代码 @价格"
+#   → System records trade, settles capital, syncs portfolio
 
 mode: simulation
 
@@ -7,10 +12,21 @@ simulation:
   record_all_orders: true
   max_simulation_orders: 1000
 
+# Execution mode — controls how agent decisions reach the user/broker
+# dry_run:          Full pipeline runs, logs everything, submits nothing
+# confirm:          Orders wait for human confirmation via API/Discord
+# auto:             Orders auto-execute after risk approval (requires QMT)
+# discord_execute:  Push to Discord, user executes manually, records via NL
+execution:
+  mode: discord_execute
+  auto_approve_below: 0         # CNY; orders below this auto-execute in 'auto' mode
+  max_price_slippage_pct: 2.0   # Reject if price drifts > 2% from proposal
+
 # QMT broker settings (used when mode: qmt)
+# Credentials: prefer env vars QMT_ACCOUNT_ID, QMT_MINI_QMT_PATH
 qmt:
-  account_id: ''           # QMT trading account ID (required for mode: qmt)
-  mini_qmt_path: ''        # Path to QMT mini terminal
+  account_id: ''           # Fallback if env var not set
+  mini_qmt_path: ''        # Fallback if env var not set
   max_order_amount: 100000 # Maximum single order amount (CNY)
   allowed_actions:
     - buy
@@ -19,5 +35,3 @@ qmt:
 live:
   require_gate_verified: true     # Must pass ConfirmationGate VERIFIED
   require_explicit_config: true   # User must set mode=live manually
-  # broker_api_url: ""            # Real broker API endpoint (NOT IMPLEMENTED)
-  # broker_api_key: ""            # Via env var only: BROKER_API_KEY

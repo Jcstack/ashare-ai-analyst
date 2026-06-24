@@ -6,6 +6,7 @@ config/notification.yaml per the config-driven design principle.
 """
 
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +17,31 @@ from src.utils.config import load_config
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Discord webhook URL pattern: https://discord.com/api/webhooks/{id}/{token}
+_WEBHOOK_URL_RE = re.compile(
+    r"^https://discord(?:app)?\.com/api/webhooks/\d{17,20}/[A-Za-z0-9_-]+$"
+)
+
+# Common placeholder patterns that should not be treated as real values
+_PLACEHOLDER_RE = re.compile(
+    r"^x{3,}$|^your[_-]|_here$|^placeholder$|^changeme$", re.IGNORECASE
+)
+
+
+def _is_placeholder_url(url: str) -> bool:
+    """Return True if the webhook URL contains placeholder segments."""
+    if not url:
+        return True
+    # Check each path segment of the webhook URL for placeholder patterns
+    parts = url.rstrip("/").split("/")
+    for part in parts[-2:]:  # Check webhook ID and token segments
+        if _PLACEHOLDER_RE.search(part):
+            return True
+    # Also reject if it doesn't match the expected Discord webhook URL format
+    if not _WEBHOOK_URL_RE.match(url):
+        return True
+    return False
 
 
 class DiscordNotifier:
@@ -45,17 +71,30 @@ class DiscordNotifier:
         full_config = load_config(config_path)
         self.config: dict[str, Any] = full_config.get("discord", {})
         self.enabled: bool = self.config.get("enabled", False)
-        self.webhook_url: str = os.environ.get("DISCORD_WEBHOOK_URL", "")
+        raw_url: str = os.environ.get("DISCORD_WEBHOOK_URL", "")
+        self._webhook_invalid: bool = False
         self._timeout: int = self.config.get("timeout_seconds", 10)
         self._max_retries: int = self.config.get("max_retries", 3)
         self._retry_delay: int = self.config.get("retry_delay_seconds", 2)
         self._templates: dict[str, Any] = self.config.get("templates", {})
 
-        if not self.webhook_url:
+        if not raw_url:
             logger.warning(
                 "DISCORD_WEBHOOK_URL environment variable is not set. "
                 "Discord notifications will be disabled."
             )
+            self.webhook_url = ""
+        elif _is_placeholder_url(raw_url):
+            logger.warning(
+                "DISCORD_WEBHOOK_URL is a placeholder or invalid value (%s…). "
+                "Discord notifications will be disabled. "
+                "Set a real webhook URL to enable notifications.",
+                raw_url[:40],
+            )
+            self.webhook_url = ""
+            self._webhook_invalid = True
+        else:
+            self.webhook_url = raw_url
 
     def send_analysis_alert(self, symbol: str, prediction: dict) -> bool:
         """Send an analysis alert for a single stock prediction.
@@ -222,7 +261,13 @@ class DiscordNotifier:
             return False
 
         if not self.webhook_url:
-            logger.warning("No webhook URL configured. Cannot send notification.")
+            # Only log at debug level if we already warned at startup
+            if self._webhook_invalid:
+                logger.debug(
+                    "Skipping Discord send — webhook URL is placeholder/invalid."
+                )
+            else:
+                logger.warning("No webhook URL configured. Cannot send notification.")
             return False
 
         last_exception: Exception | None = None

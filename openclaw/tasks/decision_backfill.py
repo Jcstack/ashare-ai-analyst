@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from openclaw.app import app
+from openclaw.celery_app import app
 
 logger = logging.getLogger(__name__)
 

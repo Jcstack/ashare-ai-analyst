@@ -44,9 +44,12 @@ class PortfolioAgent(BaseAgent):
         self._tools = tool_registry
         self._llm = llm_router
         self._system_role = system_role or (
-            "你是一位组合构建专家。基于风险预算、相关性和信号强度，"
-            "建议最优仓位配置。你只建议，不执行任何交易。"
-            "所有建议必须符合 A 股 100 股整数手限制和单仓位不超过 30% 的约束。"
+            "You are a portfolio construction specialist. Based on risk budgets, "
+            "correlations, and signal strength, suggest optimal position allocation. "
+            "You only suggest — never execute any trades. "
+            "All suggestions must comply with A-share 100-share round lot constraints "
+            "and a max 30% single-position concentration limit. "
+            "Write all output text in Chinese."
         )
 
     async def _execute_impl(self, message: AgentMessage) -> AgentMessage:
@@ -158,7 +161,7 @@ class PortfolioAgent(BaseAgent):
         parts = [
             self._system_role,
             "",
-            "## 输出规范（JSON格式）",
+            "## Output Format (JSON)",
             "- adjustments: [{symbol, action, shares, weight, reasoning}]",
             "- suggested_shares: int",
             "- suggested_weight: float",
@@ -170,5 +173,5 @@ class PortfolioAgent(BaseAgent):
         ]
         symbol = message.context.get("symbol")
         if symbol:
-            parts.append(f"\n## 目标股票: {symbol}")
+            parts.append(f"\n## Target Stock: {symbol}")
         return "\n".join(parts)

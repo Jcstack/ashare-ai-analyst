@@ -55,6 +55,11 @@ class TimelineScheduler:
             self._calendar = TradingCalendar()
         return self._calendar
 
+    def is_trading_day(self) -> bool:
+        """Delegate to TradingCalendar.is_trading_day()."""
+        cal = self._get_calendar()
+        return cal.is_trading_day()
+
     def current_profile(self) -> ScheduleProfile:
         """Determine the current schedule profile.
 

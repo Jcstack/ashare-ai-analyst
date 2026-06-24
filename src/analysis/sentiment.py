@@ -66,8 +66,9 @@ class SentimentAnalyzer:
             LLMMessage(
                 role="system",
                 content=(
-                    "你是金融新闻情感分析师。对每条新闻判断对股价的影响。\n"
-                    "严格按照JSON格式输出：\n"
+                    "You are a financial news sentiment analyst. For each news item, "
+                    "determine its impact on the stock price.\n"
+                    "Output strictly in JSON format:\n"
                     "```json\n"
                     "{\n"
                     '  "overall": "positive | negative | neutral",\n'
@@ -77,15 +78,16 @@ class SentimentAnalyzer:
                     "  ],\n"
                     '  "summary": "一句话总结情感倾向"\n'
                     "}\n"
-                    "```"
+                    "```\n"
+                    "Write all output text (especially the summary field) in Chinese."
                 ),
             ),
             LLMMessage(
                 role="user",
                 content=(
-                    f"股票: {symbol}\n\n"
-                    f"新闻列表:\n{news_text}\n\n"
-                    "请分析每条新闻对该股票的情感倾向。"
+                    f"Stock: {symbol}\n\n"
+                    f"News list:\n{news_text}\n\n"
+                    "Analyze the sentiment impact of each news item on this stock."
                 ),
             ),
         ]

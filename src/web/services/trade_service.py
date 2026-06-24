@@ -15,11 +15,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from src.utils.logger import get_logger
 from src.web.schemas.chat import AgentRecommendation, Trade, TradingProfile
 
 logger = get_logger("web.trade_service")
+
+_CST = ZoneInfo("Asia/Shanghai")
 
 _DB_PATH = Path("data/agent.db")
 
@@ -624,9 +627,14 @@ class TradeService:
                     old_cost = existing["cost_price"]
                     new_total = old_shares + shares
                     new_cost = (old_cost * old_shares + price * shares) / new_total
+                    old_today = existing.get("today_bought", 0)
                     self._portfolio_store.update_position(
                         existing["id"],
-                        {"shares": new_total, "cost_price": round(new_cost, 2)},
+                        {
+                            "shares": new_total,
+                            "cost_price": round(new_cost, 2),
+                            "today_bought": old_today + shares,
+                        },
                     )
                 else:
                     # New position — capital already settled by _settle_capital
@@ -636,7 +644,7 @@ class TradeService:
                         board=_detect_board(symbol),
                         cost_price=price,
                         shares=shares,
-                        buy_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                        buy_date=datetime.now(_CST).strftime("%Y-%m-%d"),
                         validate_capital=False,
                     )
             elif action in ("sell", "reduce"):
@@ -706,7 +714,7 @@ class TradeService:
                         "board": _detect_board(symbol),
                         "costPrice": price,
                         "shares": shares,
-                        "buyDate": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                        "buyDate": datetime.now(_CST).strftime("%Y-%m-%d"),
                         "note": "",
                     }
                 )
@@ -778,6 +786,13 @@ class TradeService:
                 );
                 """
             )
+
+            # Auto-migration: add gate_request_id column if missing
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN gate_request_id TEXT")
+                logger.info("Migrated: added gate_request_id column to trades")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
 
 # ---------------------------------------------------------------------------

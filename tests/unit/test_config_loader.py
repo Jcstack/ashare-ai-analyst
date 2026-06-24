@@ -119,16 +119,17 @@ class TestGetProjectRoot:
     """Tests for get_project_root() function."""
 
     def test_get_project_root(self):
-        """TC-D001: Verify get_project_root returns the repo root.
+        """TC-D001: Verify get_project_root returns a Path containing 'marketing'.
 
-        The project root should be the parent directory of src/, identified by
-        its project marker directories rather than a hardcoded folder name.
+        The project root should be the parent directory of src/, which is
+        the 'marketing' directory.
         """
         from src.utils.config import get_project_root
 
         root = get_project_root()
         assert isinstance(root, Path)
         assert root.exists()
+        assert "marketing" in root.name or "marketing" in str(root)
         # Verify it contains the expected project markers
         assert (root / "src").is_dir()
         assert (root / "config").is_dir()

@@ -46,12 +46,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["stocks"])
 
 _PREFIXED_RE = re.compile(r"^(?:sh|sz|bj)(\d{6})$", re.IGNORECASE)
+_SUFFIXED_RE = re.compile(r"^(\d{6})\.(?:SZ|SH|BJ)$", re.IGNORECASE)
 
 
 def _normalize_symbol(symbol: str) -> str:
-    """Strip sh/sz exchange prefix if present, returning bare 6-digit code."""
+    """Strip exchange prefix/suffix, returning bare 6-digit code.
+
+    Handles: sh000983 → 000983, 000983.SZ → 000983, SZ000983 → 000983
+    """
+    symbol = symbol.strip()
+    m = _SUFFIXED_RE.match(symbol)
+    if m:
+        return m.group(1)
     m = _PREFIXED_RE.match(symbol)
-    return m.group(1) if m else symbol
+    if m:
+        return m.group(1)
+    return symbol
 
 
 @router.get("/indicators/explanations")
@@ -689,6 +699,14 @@ async def get_comprehensive_analysis(
             return {}
         return {}
 
+    async def _get_fund_flow_timeline() -> list[dict]:
+        try:
+            return await asyncio.to_thread(
+                svc.fetcher.fetch_intraday_fund_flow_series, symbol
+            )
+        except Exception:
+            return []
+
     (
         quote,
         fund_flow,
@@ -698,6 +716,7 @@ async def get_comprehensive_analysis(
         strategy_signals,
         bayesian,
         fund_flow_detail,
+        fund_flow_timeline,
     ) = await asyncio.gather(
         _get_quote(),
         _get_fund_flow(),
@@ -707,6 +726,7 @@ async def get_comprehensive_analysis(
         _get_strategy_signals(),
         _get_bayesian(),
         _get_fund_flow_detail(),
+        _get_fund_flow_timeline(),
     )
 
     # Derive board type and price limit for the symbol
@@ -732,6 +752,7 @@ async def get_comprehensive_analysis(
             price_limit=price_limit,
             valuation=valuation,
             fund_flow_detail=fund_flow_detail,
+            fund_flow_timeline=fund_flow_timeline,
         )
         return result
     except Exception as exc:

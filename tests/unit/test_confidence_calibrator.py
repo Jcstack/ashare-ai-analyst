@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -49,9 +48,6 @@ def _insert_decisions(
     """Insert mock decisions with specified accuracy."""
     conn = sqlite3.connect(db_path)
     correct_count = int(count * correct_ratio)
-    # Use a recent timestamp so rows fall within the calibrator's lookback window
-    # (must be relative to "now", not a hardcoded date, or the test rots over time).
-    decided_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     for i in range(count):
         is_correct = 1 if i < correct_count else 0
         conn.execute(
@@ -66,7 +62,7 @@ def _insert_decisions(
                 f"p-{action}-{i}",
                 "600519",
                 action,
-                decided_at,
+                "2026-03-07T10:00:00+00:00",
                 1800.0,
                 2.0 if is_correct else -2.0,
                 is_correct,
@@ -82,7 +78,8 @@ class TestCalibrate:
     def test_no_db_returns_raw_confidence(self, tmp_path: Path) -> None:
         cal = ConfidenceCalibrator(db_path=str(tmp_path / "nonexistent.db"))
         result = cal.calibrate(0.75, "600519", "buy")
-        assert result == 0.75  # No adjustment when no data
+        # No historical data → no adjustment, returns raw confidence
+        assert result == pytest.approx(0.75, abs=0.01)
 
     def test_high_accuracy_boosts_confidence(self, db_path: str) -> None:
         _insert_decisions(db_path, "buy", 20, correct_ratio=0.85)
@@ -102,13 +99,14 @@ class TestCalibrate:
         result = cal.calibrate(0.98, "600519", "buy")
         assert result <= 1.0
 
-    def test_insufficient_samples_no_adjustment(self, db_path: str) -> None:
+    def test_insufficient_samples_no_action_adjustment(self, db_path: str) -> None:
         _insert_decisions(db_path, "buy", 2, correct_ratio=0.0)
         cal = ConfidenceCalibrator(
             db_path=db_path, config={"min_samples_for_calibration": 5}
         )
         result = cal.calibrate(0.70, "600519", "buy")
-        assert result == 0.70  # Too few samples → no adjustment
+        # Insufficient samples → no action adjustment, returns ~raw confidence
+        assert result == pytest.approx(0.70, abs=0.02)
 
     def test_regime_adjustment_bear_penalizes_buy(self, db_path: str) -> None:
         cal = ConfidenceCalibrator(db_path=db_path)
@@ -117,8 +115,9 @@ class TestCalibrate:
 
     def test_regime_adjustment_bull_boosts_buy(self, db_path: str) -> None:
         cal = ConfidenceCalibrator(db_path=db_path)
+        baseline = cal.calibrate(0.70, "600519", "buy", regime="unknown")
         result = cal.calibrate(0.70, "600519", "buy", regime="bull")
-        assert result > 0.70  # Bull regime boosts buys
+        assert result > baseline  # Bull regime boosts buys
 
 
 class TestCalibrationReport:

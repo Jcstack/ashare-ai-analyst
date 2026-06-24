@@ -4,16 +4,64 @@ Orchestrates data aggregation from multiple sources and delegates to
 TradingAdvisor for dual-layer quant + AI recommendations.
 
 Per PRD v3.2 FR-TA001~004, FR-HS003~004.
+Redis caching added per I-107 — prevents redundant LLM calls within agent tool loops.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from src.utils.logger import get_logger
 from src.web.services.stock_service import StockService
 
 logger = get_logger("web.advisor_service")
+
+# Cache TTLs (seconds)
+_ADVICE_CACHE_TTL = 300  # 5 min for stock advice
+_HOLIDAY_CACHE_TTL = 1800  # 30 min for holiday impact
+_PORTFOLIO_CACHE_TTL = 300  # 5 min for portfolio advice
+
+
+def _get_redis():
+    """Lazy Redis connection (returns None if unavailable)."""
+    try:
+        import redis
+
+        return redis.Redis(
+            host="redis",
+            port=6379,
+            db=0,
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
+    except Exception:
+        return None
+
+
+def _cache_get(key: str) -> dict | None:
+    """Read from Redis cache."""
+    try:
+        r = _get_redis()
+        if r:
+            val = r.get(key)
+            if val:
+                logger.debug("Cache HIT: %s", key)
+                return json.loads(val)
+    except Exception:
+        pass
+    return None
+
+
+def _cache_set(key: str, value: Any, ttl: int) -> None:
+    """Write to Redis cache."""
+    try:
+        r = _get_redis()
+        if r:
+            r.setex(key, ttl, json.dumps(value, ensure_ascii=False, default=str))
+    except Exception:
+        pass
 
 
 class AdvisorService:
@@ -64,6 +112,8 @@ class AdvisorService:
 
         Aggregates: quote, indicators, fund_flow, strategy signals,
         bayesian analysis, news context, global context.
+        Results are cached in Redis for 5 min to avoid redundant LLM calls
+        when the agent tool loop invokes this multiple times.
 
         Args:
             symbol: 6-digit stock code.
@@ -71,6 +121,11 @@ class AdvisorService:
         Returns:
             Advice dict from TradingAdvisor.advise_stock().
         """
+        cache_key = f"advisor:stock_advice:{symbol}"
+        cached = _cache_get(cache_key)
+        if cached:
+            return cached
+
         advisor = self._get_advisor()
 
         # Gather data
@@ -104,6 +159,7 @@ class AdvisorService:
         if stock_detail:
             result["name"] = stock_detail.get("name", "")
 
+        _cache_set(cache_key, result, _ADVICE_CACHE_TTL)
         return result
 
     def get_watchlist_strategy(self, symbols: list[str]) -> dict[str, Any]:
@@ -145,19 +201,26 @@ class AdvisorService:
     def get_holiday_impact(self, symbol: str) -> dict[str, Any]:
         """Assess holiday impact for a held stock.
 
+        Results cached in Redis for 30 min (holiday impact changes slowly).
+
         Args:
             symbol: 6-digit stock code.
 
         Returns:
             Holiday impact assessment.
         """
+        cache_key = f"advisor:holiday_impact:{symbol}"
+        cached = _cache_get(cache_key)
+        if cached:
+            return cached
+
         advisor = self._get_advisor()
 
         global_snapshot = self._fetch_global_context()
         news_items = self._fetch_news_context(symbol)
         cross_market = self._fetch_cross_market(symbol)
 
-        return advisor.assess_holiday_impact(
+        result = advisor.assess_holiday_impact(
             symbol,
             global_snapshot=global_snapshot,
             news_items=[
@@ -166,6 +229,9 @@ class AdvisorService:
             ],
             cross_market_data=cross_market,
         )
+
+        _cache_set(cache_key, result, _HOLIDAY_CACHE_TTL)
+        return result
 
     def get_reopen_briefing(self) -> dict[str, Any]:
         """Generate pre-open briefing report.
@@ -211,15 +277,38 @@ class AdvisorService:
         }
 
     def _fetch_quote(self, symbol: str) -> dict[str, Any] | None:
+        # Primary: real-time quote
         try:
             from src.data.realtime import RealtimeQuoteManager
 
             mgr = RealtimeQuoteManager()
-            quotes = mgr.get_quotes([symbol])
-            return quotes.get(symbol)
+            quote = mgr.get_single_quote(symbol)
+            if quote and quote.get("price"):
+                return quote
         except Exception as exc:
-            logger.debug("Quote fetch failed for %s: %s", symbol, exc)
-            return None
+            logger.debug("Realtime quote failed for %s: %s", symbol, exc)
+
+        # Fallback: last EOD close (stale but better than nothing)
+        try:
+            from src.data.fetcher import StockDataFetcher
+
+            fetcher = StockDataFetcher()
+            df = fetcher.fetch_daily_ohlcv(symbol)
+            if df is not None and not df.empty:
+                last = df.iloc[-1]
+                return {
+                    "symbol": symbol,
+                    "price": float(last["close"]),
+                    "high": float(last["high"]),
+                    "low": float(last["low"]),
+                    "volume": float(last.get("volume", 0)),
+                    "pct_change": float(last.get("pct_change", 0)),
+                    "_source": "eod_fallback",
+                }
+        except Exception as exc:
+            logger.debug("EOD fallback failed for %s: %s", symbol, exc)
+
+        return None
 
     def _fetch_indicators(self, symbol: str) -> dict[str, Any] | None:
         try:

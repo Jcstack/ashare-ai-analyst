@@ -51,8 +51,9 @@ class FollowUpView(discord.ui.View):
 
             # 1. Create Agent thread with context
             initial_msg = (
-                f"[系统上下文]\n{self.context_summary}\n\n"
-                "请基于以上结果，询问用户想深入了解哪些方面。"
+                f"[System Context]\n{self.context_summary}\n\n"
+                "Based on the above results, ask the user which aspects they would like to explore further. "
+                "Write all output text in Chinese."
             )
             svc = get_agent_service()
             ctx = ThreadContext(**self.thread_context_kwargs)
@@ -65,10 +66,23 @@ class FollowUpView(discord.ui.View):
             # 2. Create Discord Thread on the original message
             info = self.context_summary.split("\n")[0][:40]
             thread_name = f"\U0001f7e2 [{self.source_command}] {info}"
-            thread = await interaction.message.create_thread(
-                name=thread_name[:100],
-                auto_archive_duration=60,
-            )
+            try:
+                thread = await interaction.message.create_thread(
+                    name=thread_name[:100],
+                    auto_archive_duration=60,
+                )
+            except discord.HTTPException as thread_exc:
+                if thread_exc.code == 160004:
+                    # Thread already exists — find it
+                    logger.info("Thread already exists for message, reusing")
+                    thread = interaction.message.thread
+                    if thread is None:
+                        await interaction.followup.send(
+                            "已有对话线程，请在原线程中继续", ephemeral=True
+                        )
+                        return
+                else:
+                    raise
 
             # 3. Save mapping to Redis
             redis_client = get_redis()

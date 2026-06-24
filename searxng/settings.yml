@@ -1,0 +1,15 @@
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "CHANGE_ME-set-server.secret_key-or-SEARXNG_SECRET-env"
+  limiter: false
+  image_proxy: false
+
+outgoing:
+  request_timeout: 10
+  max_request_timeout: 15

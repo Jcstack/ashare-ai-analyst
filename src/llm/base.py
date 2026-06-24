@@ -46,7 +46,9 @@ class ProviderName(str, Enum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     GOOGLE = "google"
+    DEEPSEEK = "deepseek"
     CLAUDE_CODE = "claude_code"
+    GEMINI_WEB = "gemini_web"
 
 
 @dataclass

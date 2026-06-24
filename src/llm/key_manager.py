@@ -26,6 +26,7 @@ _ENV_KEY_MAP: dict[ProviderName, str] = {
     ProviderName.ANTHROPIC: "ANTHROPIC_API_KEY",
     ProviderName.OPENAI: "OPENAI_API_KEY",
     ProviderName.GOOGLE: "GOOGLE_API_KEY",
+    ProviderName.DEEPSEEK: "DEEPSEEK_API_KEY",
 }
 
 _DEFAULT_KEY_FILE = "config/.llm_keys.enc"

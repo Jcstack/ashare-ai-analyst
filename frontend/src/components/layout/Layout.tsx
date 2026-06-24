@@ -2,10 +2,10 @@ import { Outlet } from "react-router-dom"
 import { Sidebar } from "./Sidebar"
 import { MobileHeader } from "./MobileHeader"
 import { Toaster } from "@/components/ui/sonner"
-import { AgentFAB } from "@/components/chat/AgentFAB"
-import { ChatSheet } from "@/components/chat/ChatSheet"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { useResizable } from "@/hooks/useResizable"
+import { ChatSheet } from "@/components/chat/ChatSheet"
+import { AgentFAB } from "@/components/chat/AgentFAB"
 
 export function Layout() {
   const { width, handleMouseDown, isResizing } = useResizable()

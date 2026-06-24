@@ -12,13 +12,61 @@ import json
 import time
 import traceback
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Callable
 
 from src.utils.logger import get_logger
 
 logger = get_logger("web.tool_registry")
 
-_TOOL_TIMEOUT_SECONDS = 120
+
+def _load_prediction_from_redis(symbol: str) -> dict[str, Any]:
+    """Load the latest prediction pipeline result from Redis."""
+    try:
+        from src.web.dependencies import get_redis
+
+        r = get_redis()
+        if not r:
+            return {"error": "Redis unavailable"}
+        raw = r.get(f"prediction:{symbol}")
+        if not raw:
+            return {"error": f"No prediction found for {symbol}"}
+        return json.loads(raw)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _get_trend_candidates(min_score: int = 50, top_n: int = 10) -> list[dict]:
+    """Get early-stage trend candidates from TrendHunter."""
+    try:
+        from src.quant.trend_hunter import TrendHunter
+
+        hunter = TrendHunter()
+        candidates = hunter.scan(top_n=max(top_n, 5))
+        return [
+            {
+                "symbol": c.symbol,
+                "name": c.name,
+                "score": c.score,
+                "pct_change": c.pct_change,
+                "volume_ratio": c.volume_ratio,
+                "price": c.price,
+                "signals": c.signals,
+                "sector": c.sector,
+                "near_breakout": c.near_breakout,
+            }
+            for c in candidates
+            if c.score >= min_score
+        ][:top_n]
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+
+_TOOL_TIMEOUT_SECONDS = 30
+# LLM-backed tools (analyze_stock_detailed, get_stock_advice) need more time
+_LLM_TOOL_TIMEOUT_SECONDS = 60
+# deep_analyze builds full MarketSnapshot (15 parallel fetches) — needs more headroom
+_DEEP_TOOL_TIMEOUT_SECONDS = 90
 
 
 @dataclass
@@ -30,6 +78,34 @@ class ToolDefinition:
     input_schema: dict[str, Any]
     handler: Callable[..., Any]
     is_async: bool = False
+    llm_backed: bool = False  # True for Tier 3+ tools that make inner LLM calls
+    deep: bool = False  # True for heavy data tools (deep_analyze) needing 90s timeout
+    tier: str = "extended"  # "core" = always loaded, "extended" = on-demand
+
+
+# Tools always loaded with full schema (used in every heartbeat)
+_CORE_TOOL_NAMES: set[str] = {
+    "get_portfolio",
+    "get_realtime_quote",
+    "get_capital_balance",
+    "get_market_pulse",
+    "get_limit_up_pool",
+    "get_sector_leaders",
+    "get_trend_candidates",
+    "get_opportunity_candidates",
+    "evaluate_signals",
+    "deep_analyze",
+    "detect_sentiment_phase",
+    "get_active_theses",
+    "capital_flow_tool",
+    "search_stocks",
+    "get_trending_news",
+    "record_manual_trade",
+    "submit_buy_signal",
+    "submit_sell_signal",
+    "submit_hold_update",
+    "load_tool_schema",
+}
 
 
 class ToolRegistry:
@@ -57,6 +133,51 @@ class ToolRegistry:
             for td in self._tools.values()
         ]
 
+    def get_core_definitions(self) -> list[dict[str, Any]]:
+        """Return only core-tier tools with full schema.
+
+        Extended tools are available via the load_tool_schema meta-tool.
+        Saves ~75% of token overhead vs get_tool_definitions().
+        """
+        return [
+            {
+                "name": td.name,
+                "description": td.description,
+                "input_schema": td.input_schema,
+            }
+            for td in self._tools.values()
+            if td.tier == "core"
+        ]
+
+    def get_extended_catalog(self) -> str:
+        """Return a compact catalog of extended tools (name + description only).
+
+        Injected into system prompt so the agent knows what's available
+        and can call load_tool_schema(name) to load full schema on demand.
+        """
+        lines = []
+        for td in self._tools.values():
+            if td.tier != "core":
+                lines.append(f"- {td.name}: {td.description[:80]}")
+        if not lines:
+            return ""
+        return (
+            "## 扩展工具（按需加载）\n"
+            "以下工具可用但未加载。需要时调用 load_tool_schema(name) 加载后使用。\n"
+            + "\n".join(lines)
+        )
+
+    def get_tool_schema(self, name: str) -> dict[str, Any] | None:
+        """Return full schema for a single tool (used by load_tool_schema)."""
+        td = self._tools.get(name)
+        if td is None:
+            return None
+        return {
+            "name": td.name,
+            "description": td.description,
+            "input_schema": td.input_schema,
+        }
+
     async def execute(self, name: str, tool_input: dict[str, Any]) -> str:
         """Execute a tool by name and return JSON result string.
 
@@ -71,16 +192,22 @@ class ToolRegistry:
         if td is None:
             return json.dumps({"error": f"Unknown tool: {name}"})
 
+        if td.deep:
+            timeout = _DEEP_TOOL_TIMEOUT_SECONDS
+        elif td.llm_backed:
+            timeout = _LLM_TOOL_TIMEOUT_SECONDS
+        else:
+            timeout = _TOOL_TIMEOUT_SECONDS
         start = time.perf_counter()
         try:
             if td.is_async:
                 result = await asyncio.wait_for(
-                    td.handler(**tool_input), timeout=_TOOL_TIMEOUT_SECONDS
+                    td.handler(**tool_input), timeout=timeout
                 )
             else:
                 result = await asyncio.wait_for(
                     asyncio.to_thread(td.handler, **tool_input),
-                    timeout=_TOOL_TIMEOUT_SECONDS,
+                    timeout=timeout,
                 )
 
             elapsed = (time.perf_counter() - start) * 1000
@@ -93,10 +220,10 @@ class ToolRegistry:
             return _serialize(result)
         except asyncio.TimeoutError:
             elapsed = (time.perf_counter() - start) * 1000
-            logger.warning("Tool %s timed out after %ds", name, _TOOL_TIMEOUT_SECONDS)
+            logger.warning("Tool %s timed out after %ds", name, timeout)
             return json.dumps(
                 {
-                    "error": f"工具 {name} 执行超时 ({_TOOL_TIMEOUT_SECONDS}s)",
+                    "error": f"工具 {name} 执行超时 ({timeout}s)",
                     "tool": name,
                 }
             )
@@ -128,6 +255,8 @@ class ToolRegistry:
         handler: Callable[..., Any],
         *,
         is_async: bool = False,
+        llm_backed: bool = False,
+        deep: bool = False,
     ) -> None:
         """Register a tool.
 
@@ -137,6 +266,7 @@ class ToolRegistry:
             input_schema: JSON Schema describing the tool input.
             handler: Callable implementing the tool logic.
             is_async: Whether the handler is an async coroutine.
+            llm_backed: Whether this tool makes inner LLM calls (Tier 3+).
         """
         self._tools[name] = ToolDefinition(
             name=name,
@@ -144,6 +274,31 @@ class ToolRegistry:
             input_schema=input_schema,
             handler=handler,
             is_async=is_async,
+            llm_backed=llm_backed,
+            deep=deep,
+            tier="core" if name in _CORE_TOOL_NAMES else "extended",
+        )
+
+    def is_llm_backed(self, name: str) -> bool:
+        """Check if a tool makes inner LLM calls."""
+        td = self._tools.get(name)
+        return td.llm_backed if td else False
+
+    async def execute_parallel(
+        self, calls: list[tuple[str, dict[str, Any]]]
+    ) -> list[str]:
+        """Execute multiple tool calls concurrently.
+
+        Args:
+            calls: List of (tool_name, tool_input) tuples.
+
+        Returns:
+            List of JSON result strings in the same order as calls.
+        """
+        if len(calls) == 1:
+            return [await self.execute(calls[0][0], calls[0][1])]
+        return list(
+            await asyncio.gather(*(self.execute(name, inp) for name, inp in calls))
         )
 
     def register_all(self, deps: dict[str, Any]) -> None:
@@ -164,6 +319,10 @@ class ToolRegistry:
         self._register_intel_tools(deps)
         self._register_fusion_tools(deps)
         self._register_intelligence_tools(deps)
+        self._register_deep_analysis_tool(deps)
+        self._register_intraday_tools(deps)
+        self._register_advanced_tools(deps)
+        self._register_agent_loop_tools(deps)
 
     # ------------------------------------------------------------------
     # Tier 1 — Data tools
@@ -387,13 +546,50 @@ class ToolRegistry:
         if not trade_service:
             return
 
+        execution_bridge = deps.get("execution_bridge")
+
+        def _execute_trade_handler(
+            symbol, stock_name, action, shares, price, reasoning=""
+        ):
+            """Route through execution bridge when available, else simulation."""
+            if execution_bridge and execution_bridge.is_live_mode():
+                result = execution_bridge.process_proposal(
+                    symbol=symbol,
+                    action=action,
+                    shares=int(shares),
+                    price=float(price),
+                    stock_name=stock_name,
+                    reasoning=reasoning,
+                )
+                return {
+                    "status": result.status,
+                    "gate_request_id": result.gate_request_id,
+                    "broker_order_id": result.broker_order_id,
+                    "reason": result.reason,
+                    "message": (
+                        f"{result.status}: {action} {symbol} {shares}股 @ {price}元"
+                    ),
+                }
+            return trade_service.execute_trade(
+                symbol=symbol,
+                stock_name=stock_name,
+                action=action,
+                shares=shares,
+                price=price,
+                reasoning=reasoning,
+            )
+
+        is_live = execution_bridge and execution_bridge.is_live_mode()
+        trade_desc = (
+            "执行交易（买入/卖出/加仓/减仓）。订单将通过风控预检后提交至券商。"
+            if is_live
+            else "执行一笔模拟交易（买入/卖出/加仓/减仓）。"
+            "交易将记录到用户的模拟持仓中。"
+        )
+
         self.register(
             name="execute_trade",
-            description=(
-                "执行一笔模拟交易（买入/卖出/加仓/减仓）。"
-                "交易将记录到用户的模拟持仓中。"
-                "在给出交易建议并获得用户确认后调用此工具。"
-            ),
+            description=trade_desc,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -425,16 +621,7 @@ class ToolRegistry:
                 },
                 "required": ["symbol", "stock_name", "action", "shares", "price"],
             },
-            handler=lambda symbol, stock_name, action, shares, price, reasoning="": (
-                trade_service.execute_trade(
-                    symbol=symbol,
-                    stock_name=stock_name,
-                    action=action,
-                    shares=shares,
-                    price=price,
-                    reasoning=reasoning,
-                )
-            ),
+            handler=_execute_trade_handler,
         )
 
         self.register(
@@ -591,6 +778,7 @@ class ToolRegistry:
                     "required": ["symbol"],
                 },
                 handler=lambda symbol: advisor_service.get_stock_advice(symbol),
+                llm_backed=True,
             )
 
             self.register(
@@ -620,6 +808,7 @@ class ToolRegistry:
                 handler=lambda positions: advisor_service.get_portfolio_advice(
                     positions
                 ),
+                llm_backed=True,
             )
 
             self.register(
@@ -639,7 +828,57 @@ class ToolRegistry:
                     "required": ["symbol"],
                 },
                 handler=lambda symbol: advisor_service.get_holiday_impact(symbol),
+                llm_backed=True,
             )
+
+        # Prediction pipeline results (stored in Redis by task_predict_all)
+        self.register(
+            name="get_prediction_summary",
+            description=(
+                "获取最近一次AI量化预测结果（每天17:00自动生成）。"
+                "包含趋势判断、信号方向、置信度、关键因素和风险警告。"
+                "用于在交易决策前参考量化分析的结论。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "股票代码，如 '600519'",
+                    }
+                },
+                "required": ["symbol"],
+            },
+            handler=lambda symbol: _load_prediction_from_redis(symbol),
+        )
+
+        # Early trend detection (v61.0 Hunter Mode)
+        self.register(
+            name="get_trend_candidates",
+            description=(
+                "扫描全市场寻找趋势刚启动的股票（不是已涨停的）。"
+                "找的是：底部放量+板块聚集+即将突破的票，涨幅<7%还能买入。"
+                "比涨停池更有价值——发现猎物在它起飞前。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "min_score": {
+                        "type": "integer",
+                        "description": "最低评分（默认50）",
+                        "default": 50,
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "返回数量（默认10）",
+                        "default": 10,
+                    },
+                },
+            },
+            handler=lambda min_score=50, top_n=10: _get_trend_candidates(
+                int(min_score), int(top_n)
+            ),
+        )
 
         sentiment_service = deps.get("sentiment_service")
         if sentiment_service:
@@ -662,6 +901,7 @@ class ToolRegistry:
                 handler=lambda watchlist=None: sentiment_service.get_market_pulse(
                     watchlist=watchlist
                 ),
+                llm_backed=True,
             )
 
         prediction_service = deps.get("prediction_service")
@@ -684,6 +924,7 @@ class ToolRegistry:
                     "required": ["symbol"],
                 },
                 handler=lambda symbol: prediction_service.predict(symbol),
+                llm_backed=True,
             )
 
         backtest_service = deps.get("backtest_service")
@@ -753,7 +994,9 @@ class ToolRegistry:
                     "required": ["returns", "portfolio_value"],
                 },
                 handler=lambda returns, portfolio_value, confidence_level=0.95: (
-                    _serialize_risk_results(
+                    {"error": "returns array is empty, need at least 5 data points"}
+                    if not returns or len(returns) < 5
+                    else _serialize_risk_results(
                         var_calc.calculate_all(
                             returns, portfolio_value, confidence_level
                         )
@@ -1338,10 +1581,1620 @@ class ToolRegistry:
                 },
                 "required": ["symbol"],
             },
-            handler=lambda symbol, name="": _handle_constraint_check(symbol, name),
+            handler=lambda symbol, name="", stock_name="", **_kw: (
+                _handle_constraint_check(symbol, name or stock_name)
+            ),
         )
 
         logger.info("Registered 6 intelligence tools (v34.0)")
+
+    # ------------------------------------------------------------------
+    # Tier 9 — Deep Analysis (trading-loop grade context)
+    # ------------------------------------------------------------------
+
+    def _register_deep_analysis_tool(self, deps: dict[str, Any]) -> None:
+        """Register deep analysis tool that uses ContextBuilder + DecisionPipeline.
+
+        This gives agent chat the same analytical depth as the trading loop:
+        MarketSnapshot with 8 dimension blocks (quant, funds, intel, regime,
+        portfolio, risk, macro, thesis) built in parallel via ContextBuilder.
+        """
+        self.register(
+            name="deep_analyze",
+            description=(
+                "Deep-analyze a stock using the same engine as the autonomous trading loop. "
+                "Builds a full MarketSnapshot in parallel across 15+ dimensions: "
+                "realtime quotes, capital flow, intelligence/news, quant signals (VWAP/VPIN), "
+                "multi-timeframe confirmation, reflexivity state, sentiment cycle phase, "
+                "portfolio position, risk state, macro indicators, geopolitical tone, "
+                "and active thesis. Returns the complete snapshot text plus a structured "
+                "investment decision (action, confidence, entry range, stop-loss, target, "
+                "position size, holding period, invalidation trigger).\n\n"
+                "PREFER this tool over calling get_realtime_quote + search_intel separately. "
+                "One call gives you all the context you need for professional-grade analysis."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "6-digit A-share stock code, e.g. '600519'",
+                    },
+                    "stock_name": {
+                        "type": "string",
+                        "description": "Stock name (optional, auto-resolved if omitted)",
+                        "default": "",
+                    },
+                },
+                "required": ["symbol"],
+            },
+            handler=lambda symbol, stock_name="": _handle_deep_analyze(
+                symbol, stock_name
+            ),
+            is_async=False,
+            deep=True,
+        )
+        logger.info("Registered deep_analyze tool (trading-loop grade)")
+
+    # ------------------------------------------------------------------
+    # Tier 1.5 — Intraday tools (v55.0)
+    # ------------------------------------------------------------------
+
+    def _register_intraday_tools(self, deps: dict[str, Any]) -> None:
+        """Register real-time intraday data tools for trading-hour sessions.
+
+        These give InvestorAgent the same intraday visibility that Agent Chat
+        has via MCP tools — minute-level fund flow, patterns, bars, etc.
+        """
+        stock_service = deps.get("stock_service")
+        minute_bar_fetcher = deps.get("minute_bar_fetcher")
+
+        # --- Tool 1: Intraday fund flow timeline (30-min samples) ---
+        if stock_service:
+            self.register(
+                name="get_intraday_fund_flow_timeline",
+                description=(
+                    "获取个股盘中资金流时间线（30分钟采样），"
+                    "含主力/超大单/大单/中单/小单净流入时序。"
+                    "用于判断资金日内流向趋势（如持续流入/流出/反转）。"
+                    "返回约8-10个采样点覆盖全天交易时段。"
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "股票代码，如 '600519'",
+                        }
+                    },
+                    "required": ["symbol"],
+                },
+                handler=lambda symbol: (
+                    stock_service.fetcher.fetch_intraday_fund_flow_series(symbol)
+                ),
+            )
+
+        # --- Tool 2: Intraday pattern detection (8 A-share patterns) ---
+        if stock_service and minute_bar_fetcher:
+
+            def _detect_intraday_patterns(symbol: str) -> list[dict]:
+                from src.agent_loop.intraday_patterns import IntradayPatternDetector
+                from src.data.realtime import RealtimeQuoteManager
+
+                detector = IntradayPatternDetector()
+                bars_df = minute_bar_fetcher.fetch(symbol, period="5", days=1)
+                if bars_df is None or bars_df.empty:
+                    return [{"info": "无分钟K线数据，盘中模式检测不可用"}]
+
+                quote_mgr = RealtimeQuoteManager()
+                quote = quote_mgr.get_single_quote(symbol) or {}
+
+                patterns = detector.detect_all(
+                    symbol=symbol, minute_bars=bars_df, quote=quote
+                )
+                return [p.to_dict() if hasattr(p, "to_dict") else p for p in patterns]
+
+            self.register(
+                name="get_intraday_patterns",
+                description=(
+                    "检测个股盘中8种异动模式：冲高回落、低开高走、尾盘拉升、"
+                    "尾盘跳水、量价背离、VWAP压制/支撑、缩量、开盘冲击。"
+                    "返回结构化模式列表含severity(严重度)和direction(方向)。"
+                    "仅在交易时段有数据。"
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "股票代码",
+                        }
+                    },
+                    "required": ["symbol"],
+                },
+                handler=_detect_intraday_patterns,
+            )
+
+        # --- Tool 3: Minute bars (5/15/30/60 min OHLCV) ---
+        if minute_bar_fetcher:
+            self.register(
+                name="get_minute_bars",
+                description=(
+                    "获取个股分钟K线数据（OHLCV）。支持5/15/30/60分钟级别。"
+                    "用于分时级别的量价分析。默认5分钟线、最近1天。"
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "股票代码",
+                        },
+                        "period": {
+                            "type": "string",
+                            "description": "K线周期: '5'(默认)/'15'/'30'/'60'",
+                        },
+                    },
+                    "required": ["symbol"],
+                },
+                handler=lambda symbol, period="5": minute_bar_fetcher.fetch(
+                    symbol, period=period, days=1
+                ),
+            )
+
+        # --- Tool 4: Dragon tiger data (龙虎榜) ---
+        if stock_service:
+            self.register(
+                name="get_dragon_tiger",
+                description=(
+                    "获取个股龙虎榜统计数据（近三月汇总），"
+                    "含买入/卖出总额、净买入额、上榜次数等。"
+                    "用于判断机构和游资的动向。"
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "股票代码",
+                        }
+                    },
+                    "required": ["symbol"],
+                },
+                handler=lambda symbol: (
+                    stock_service.fetcher.fetch_dragon_tiger_stock_stats(symbol)
+                ),
+            )
+
+        # --- Tool 5: Support and resistance levels ---
+        if stock_service:
+            self.register(
+                name="get_support_resistance",
+                description=(
+                    "获取个股关键支撑位和阻力位（基于历史价格分析），"
+                    "含价位、类型(support/resistance)和触碰次数。"
+                    "用于判断入场价位、止损位和目标位。"
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "股票代码",
+                        }
+                    },
+                    "required": ["symbol"],
+                },
+                handler=lambda symbol: stock_service.get_support_resistance(symbol),
+            )
+
+        logger.info("Registered 5 intraday tools (v55.0)")
+
+        # --- Tool: Call-auction signals (集合竞价弱转强) ---
+        def _get_call_auction_signals() -> list[dict]:
+            from src.data.call_auction import CallAuctionCollector
+
+            try:
+                from src.web.dependencies import get_redis
+
+                collector = CallAuctionCollector(redis_client=get_redis())
+            except Exception:
+                collector = CallAuctionCollector()
+
+            candidates = collector.get_auction_candidates(min_volume=50000)
+            if not candidates:
+                return [{"info": "暂无集合竞价候选（9:25后可用）"}]
+
+            # Return top 10
+            return candidates[:10]
+
+        self.register(
+            name="get_call_auction_signals",
+            description=(
+                "获取今日集合竞价（9:15-9:25）弱转强信号。"
+                "返回价格由低走高、放量的候选股列表。"
+                "最佳使用时机：9:25-10:00 早盘开始前选股。"
+            ),
+            input_schema={"type": "object", "properties": {}},
+            handler=lambda: _get_call_auction_signals(),
+        )
+
+    # ------------------------------------------------------------------
+    # Agent loop domain tools
+    # ------------------------------------------------------------------
+    # Advanced tools — sub-agent, dry-run, sentiment metrics (v55.0 Sprint 4)
+    # ------------------------------------------------------------------
+
+    def _register_advanced_tools(self, deps: dict[str, Any]) -> None:
+        """Register advanced agent capabilities: sub-agent, dry-run, sentiment."""
+        gateway = deps.get("gateway")
+        stock_service = deps.get("stock_service")
+
+        # --- Sub-agent: spawn research agent ---
+        if gateway:
+
+            async def _spawn_research(task: str, symbol: str = "") -> str:
+                from src.agent_loop.sub_agent import SubAgentRunner
+                from src.web.dependencies import get_tool_registry
+
+                runner = SubAgentRunner(
+                    gateway=gateway,
+                    tool_registry=get_tool_registry(),
+                    max_cost_usd=0.05,
+                    max_turns=5,
+                )
+                return await runner.run(task, symbol)
+
+            self.register(
+                name="spawn_research_agent",
+                description=(
+                    "启动子Agent深度研究一个问题。子Agent有独立工具集和成本预算，"
+                    "不会干扰当前分析。用于需要深入调查的问题，如'分析该股龙虎榜机构行为'。"
+                    "返回研究结论（500字内）。"
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "task": {
+                            "type": "string",
+                            "description": "研究任务描述，如'分析600498龙虎榜机构行为'",
+                        },
+                        "symbol": {
+                            "type": "string",
+                            "description": "相关股票代码（可选）",
+                        },
+                    },
+                    "required": ["task"],
+                },
+                handler=_spawn_research,
+                is_async=True,
+            )
+
+        # --- Dry-run: simulate trade impact ---
+        self.register(
+            name="simulate_trade",
+            description=(
+                "模拟交易对组合的影响。在推荐买入前调用此工具，"
+                "检查仓位集中度、板块暴露、现金余额和隔夜风险。"
+                "返回通过/未通过的检查项。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "股票代码"},
+                    "action": {
+                        "type": "string",
+                        "description": "buy/sell/add/reduce",
+                    },
+                    "shares": {"type": "integer", "description": "股数"},
+                    "price": {"type": "number", "description": "价格"},
+                    "stop_loss": {
+                        "type": "number",
+                        "description": "止损价（可选）",
+                    },
+                },
+                "required": ["symbol", "action", "shares", "price"],
+            },
+            handler=lambda symbol, action, shares, price, stop_loss=None: (
+                self._run_dry_run(symbol, action, int(shares), float(price), stop_loss)
+            ),
+        )
+
+        # --- Consecutive board promotion rate ---
+        if stock_service:
+            self.register(
+                name="get_consecutive_board_rate",
+                description=(
+                    "获取连板晋级率数据 — 情绪周期关键拐点信号。"
+                    "包含涨停总数、首板/二板/三板+数量、最高连板数、"
+                    "晋级率(1→2板、2→3板)、趋势和信号判断。"
+                    "晋级率下降=情绪见顶，晋级率上升=情绪加速。"
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "date": {
+                            "type": "string",
+                            "description": "日期YYYYMMDD格式（可选，默认今天）",
+                        }
+                    },
+                    "required": [],
+                },
+                handler=lambda date="": self._get_board_rate(
+                    stock_service.fetcher, date
+                ),
+            )
+
+        # --- Decision pipeline: debate + sizing + risk gate ---
+        self.register(
+            name="run_decision_pipeline",
+            description=(
+                "对买入/卖出信号运行完整决策流水线（辩论引擎+贝叶斯推理+仓位计算+风控检查）。"
+                "输入: symbol, action(buy/sell/add/reduce), confidence(0-1), reason。"
+                "返回: approved + TradeProposal(含shares/entry_price/stop_loss) 或 rejected + 原因。"
+                "买入信号建议先通过此工具验证。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "股票代码"},
+                    "name": {"type": "string", "description": "股票名称"},
+                    "action": {
+                        "type": "string",
+                        "description": "buy/sell/add/reduce",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "信号置信度 0-1",
+                    },
+                    "reason": {"type": "string", "description": "触发原因"},
+                },
+                "required": ["symbol", "action", "confidence", "reason"],
+            },
+            handler=lambda **kw: ToolRegistry._run_decision_pipeline(**kw),
+            llm_backed=True,
+        )
+
+        logger.info("Registered 4 advanced tools (v55.0+v56.0)")
+
+    @staticmethod
+    def _run_dry_run(
+        symbol: str,
+        action: str,
+        shares: int,
+        price: float,
+        stop_loss: float | None = None,
+    ) -> dict:
+        from src.agent_loop.dry_run import DryRunHarness
+        from src.web.dependencies import get_trade_service
+
+        harness = DryRunHarness()
+        trade_svc = get_trade_service()
+        try:
+            broker = trade_svc.broker if trade_svc else None
+            raw_positions = broker.get_positions() if broker else []
+            positions = [
+                {
+                    "symbol": p.symbol,
+                    "shares": p.shares,
+                    "costPrice": p.cost_price,
+                    "currentPrice": getattr(p, "current_price", p.cost_price),
+                }
+                for p in raw_positions
+            ]
+            cash = broker.get_cash() if broker else 100000
+        except Exception:
+            positions = []
+            cash = 100000
+
+        proposal = {
+            "symbol": symbol,
+            "action": action,
+            "shares": shares,
+            "entry_price": price,
+            "stop_loss": stop_loss,
+        }
+        report = harness.simulate(proposal, positions, cash)
+        return {
+            "summary": report.to_summary(),
+            "all_passed": report.all_passed,
+            "checks_passed": report.checks_passed,
+            "checks_failed": report.checks_failed,
+            "new_position_pct": report.new_position_pct,
+            "overnight_risk_pct": report.overnight_risk_pct,
+        }
+
+    @staticmethod
+    def _get_board_rate(fetcher: Any, date: str = "") -> dict:
+        from src.data.consecutive_board import ConsecutiveBoardTracker
+
+        tracker = ConsecutiveBoardTracker(fetcher=fetcher)
+        snapshot = tracker.compute_snapshot(date=date)
+        if snapshot:
+            return snapshot.to_dict()
+        return {"error": "连板数据不可用"}
+
+    # ------------------------------------------------------------------
+    # Decision pipeline handler (v56.0 Sprint 4)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _run_decision_pipeline(
+        symbol: str,
+        action: str,
+        confidence: float,
+        reason: str,
+        name: str = "",
+    ) -> dict:
+        """Bridge agent tool call to DecisionPipeline.evaluate()."""
+        try:
+            from src.web.dependencies import get_decision_pipeline
+
+            pipeline = get_decision_pipeline()
+
+            from src.agent_loop.models import (
+                AggregatedSignal,
+                SignalDirection,
+                UrgencyTier,
+            )
+
+            direction_map = {
+                "buy": SignalDirection.BUY,
+                "sell": SignalDirection.SELL,
+                "add": SignalDirection.BUY,
+                "reduce": SignalDirection.SELL,
+            }
+            signal = AggregatedSignal(
+                symbol=symbol,
+                name=name or symbol,
+                direction=direction_map.get(action, SignalDirection.BUY),
+                source="investor_agent",
+                confidence=confidence,
+                urgency=UrgencyTier.NORMAL,
+                reason=reason,
+            )
+
+            # Get portfolio context
+            from src.web.dependencies import get_capital_service, get_trade_service
+
+            portfolio: list[dict] = []
+            cash = 100000.0
+            try:
+                trade_svc = get_trade_service()
+                if trade_svc and hasattr(trade_svc, "broker"):
+                    positions = trade_svc.broker.get_positions()
+                    portfolio = [
+                        {
+                            "symbol": p.symbol,
+                            "shares": p.shares,
+                            "costPrice": p.cost_price,
+                        }
+                        for p in positions
+                    ]
+                cap_svc = get_capital_service()
+                overview = cap_svc.get_overview() if cap_svc else {}
+                cash = float(
+                    overview.get("available_cash", overview.get("cash", 100000))
+                )
+            except Exception:
+                pass
+
+            import asyncio
+
+            loop = asyncio.new_event_loop()
+            try:
+                proposal = loop.run_until_complete(
+                    pipeline.evaluate(
+                        signal=signal,
+                        portfolio=portfolio,
+                        available_cash=cash,
+                    )
+                )
+            finally:
+                loop.close()
+
+            if proposal is None:
+                return {
+                    "status": "rejected",
+                    "reason": "决策管线拒绝（风控/置信度/辩论否决）",
+                }
+            return {
+                "status": "approved",
+                "proposal": proposal.to_dict()
+                if hasattr(proposal, "to_dict")
+                else str(proposal),
+            }
+        except Exception as exc:
+            return {"status": "error", "reason": str(exc)}
+
+    # ------------------------------------------------------------------
+
+    def _register_agent_loop_tools(self, _deps: dict[str, Any]) -> None:
+        """Register domain-specific tools for the InvestorAgent loop.
+
+        These expose the system's core analytical modules (sentiment cycle,
+        leader detection, thesis tracker, etc.) as tools the LLM can call.
+        """
+
+        # --- load_tool_schema: progressive disclosure meta-tool ---
+        def _load_tool_schema(name: str) -> dict[str, Any]:
+            schema = self.get_tool_schema(name)
+            if schema is None:
+                available = [n for n, t in self._tools.items() if t.tier == "extended"]
+                return {
+                    "error": f"Tool '{name}' not found",
+                    "available_extended_tools": available[:20],
+                }
+            return {
+                "status": "loaded",
+                "tool_name": name,
+                "description": schema["description"],
+                "input_schema": schema["input_schema"],
+                "hint": f"Tool '{name}' is now available. Call it directly.",
+            }
+
+        self.register(
+            name="load_tool_schema",
+            description=(
+                "加载一个扩展工具的完整参数定义。"
+                "当你需要使用扩展工具列表中的工具时，先调用此工具加载它的schema，"
+                "然后就可以直接调用该工具。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "要加载的工具名称",
+                    },
+                },
+                "required": ["name"],
+            },
+            handler=_load_tool_schema,
+        )
+
+        # --- load_skill: on-demand trading knowledge ---
+        self.register(
+            name="load_skill",
+            description=(
+                "Load a trading knowledge skill file on demand. "
+                "Available skills: sentiment_framework, risk_rules, "
+                "leader_detection, a_share_rules, thesis_management, "
+                "decision_process, stock_selection, overnight_analysis. "
+                "Call this when you need specific domain knowledge for your analysis."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "Skill file name (without .md extension)",
+                    },
+                },
+                "required": ["skill_name"],
+            },
+            handler=lambda skill_name: _load_skill(skill_name),
+        )
+
+        # --- get_belief_state: market regime snapshot ---
+        self.register(
+            name="get_belief_state",
+            description=(
+                "Get the current market regime state: sentiment phase "
+                "(freezing/ignition/acceleration/climax/ebb), HMM regime "
+                "(bull/bear/consolidation), risk budget remaining, "
+                "position limits, and cash strategy."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+            },
+            handler=lambda: _get_belief_state(),
+        )
+
+        # --- detect_sentiment_phase: emotion cycle detection ---
+        self.register(
+            name="detect_sentiment_phase",
+            description=(
+                "Detect the current A-share market sentiment phase and "
+                "get position sizing guidance. Returns phase name, "
+                "max_position_pct, max_single_stock_pct, stop_loss_pct."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+            },
+            handler=lambda: _detect_sentiment_phase(),
+        )
+
+        # --- get_active_theses: list investment theses ---
+        self.register(
+            name="get_active_theses",
+            description=(
+                "List all active investment theses. Each thesis tracks "
+                "why a position was opened, its entry/exit conditions, "
+                "current confidence, and expiry date."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+            },
+            handler=lambda: _get_active_theses(),
+        )
+
+        # --- get_outcome_stats: signal accuracy statistics ---
+        self.register(
+            name="get_outcome_stats",
+            description=(
+                "Get historical signal accuracy statistics: per-source "
+                "win rate, per-action accuracy, and calibration data. "
+                "Useful for assessing confidence in current signals."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "lookback_days": {
+                        "type": "integer",
+                        "description": "Days of history to analyze (default 30)",
+                        "default": 30,
+                    },
+                },
+            },
+            handler=lambda lookback_days=30: _get_outcome_stats(lookback_days),
+        )
+
+        # --- get_opportunity_candidates: market scanner results (v57.0) ---
+        self.register(
+            name="get_opportunity_candidates",
+            description=(
+                "获取今日全市场扫描结果 — 按龙头评分排序的候选标的列表。"
+                "数据来自每15分钟运行的市场扫描器（零LLM成本）。"
+                "返回: symbol, name, sector, total_score, reason, scores。"
+                "在午后扫描和尾盘决策时必须先调用此工具了解全市场机会。"
+                "配合 load_skill('stock_selection') 使用游资选股方法论。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "min_score": {
+                        "type": "number",
+                        "description": "最低分数过滤（默认50）",
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "返回前N个候选（默认10）",
+                    },
+                },
+            },
+            handler=lambda min_score=50, top_n=10: _get_scanner_candidates(
+                float(min_score), int(top_n)
+            ),
+        )
+
+        # --- get_overnight_transmission: cross-market sector impact (I-113) ---
+        self.register(
+            name="get_overnight_transmission",
+            description=(
+                "获取隔夜跨市场传导分析 — 美股/大宗商品/汇率变动对A股各板块的影响。"
+                "基于传导敏感度映射自动计算每个板块的'顺风/逆风'评分。"
+                "在盘前分析(pre_market)时必须调用此工具了解隔夜全球市场对A股的影响。"
+                "返回: 板块影响列表(排序) + 综合场景判断 + 敏感度系数。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+            },
+            handler=lambda: _compute_overnight_transmission(),
+        )
+
+        # --- get_market_pulse: lightweight "what's happening NOW" (heartbeat) ---
+        self.register(
+            name="get_market_pulse",
+            description=(
+                "获取当前市场脉搏 — 大盘指数、涨跌家数、板块异动、持仓盈亏变化。"
+                "这是心跳Agent的第一个工具调用，了解当前状况后决定下一步。"
+                "返回: 指数(上证/深成/创业板)、涨跌停数、北向资金、板块轮动、"
+                "持仓实时盈亏(如有)。轻量级，<2s。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+            },
+            handler=lambda: _get_market_pulse(),
+        )
+
+        # --- get_limit_up_pool: today's limit-up stocks (Phase 3: discovery) ---
+        self.register(
+            name="get_limit_up_pool",
+            description=(
+                "获取今日涨停池 — 所有涨停股票列表，含封板金额、连板数、首封时间、"
+                "炸板次数、所属行业。用于发现龙头股和市场主线。"
+                "返回: symbol, name, pct_change, price, seal_amount, first_seal_time, "
+                "break_count, consecutive, industry。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+            },
+            handler=lambda: _get_limit_up_pool(),
+        )
+
+        # --- get_sector_leaders: top sectors by capital inflow (Phase 3) ---
+        self.register(
+            name="get_sector_leaders",
+            description=(
+                "获取板块资金龙头 — 按净流入排序的行业板块，每个板块返回领涨股。"
+                "用于判断市场主线方向和资金偏好。"
+                "返回: sector, net_inflow, change_pct, leader_stocks。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "top_n": {
+                        "type": "integer",
+                        "description": "返回前N个板块（默认5）",
+                    },
+                },
+            },
+            handler=lambda top_n=5: _get_sector_leaders(int(top_n)),
+        )
+
+        logger.info("Registered %d agent loop tools", 10)
+
+    # ------------------------------------------------------------------
+    # Decision expression tools (Phase 2 — Claude Code alignment)
+    # ------------------------------------------------------------------
+
+    def _register_decision_tools(
+        self,
+        decision_handler: Any,
+        agent: Any,
+    ) -> None:
+        """Register submit_buy/sell/hold tools for autonomous decision expression.
+
+        These tools are called by the LLM during its agent loop to express
+        trading decisions. The handler pushes decisions through the same
+        pipeline as JSON-parsed decisions (validation, calibration, risk gate).
+
+        NOT registered in ``register_all()`` because they need DecisionHandler
+        and HeartbeatAgent references that only exist after construction.
+
+        Args:
+            decision_handler: DecisionHandler instance for push_single_decision.
+            agent: HeartbeatAgent instance (for _current_state access).
+        """
+        from src.agent_loop.agent_state import AgentState
+
+        async def _handle_submit_buy(
+            symbol: str,
+            name: str,
+            shares: int,
+            entry_price: float,
+            stop_loss: float,
+            target_price: float,
+            confidence: float,
+            summary: str,
+            hold_days: int = 0,
+            risk_note: str = "",
+        ) -> dict[str, Any]:
+            # --- Hard buyability check: reject limit-up stocks ---
+            try:
+                from src.data.realtime import RealtimeQuoteManager
+
+                rqm = RealtimeQuoteManager()
+                q = rqm.get_single_quote(symbol)
+                if q:
+                    pct = float(q.get("pct_change", q.get("change_pct", 0)) or 0)
+                    # Detect board type for correct limit
+                    is_chinext_star = symbol.startswith(("3", "68"))
+                    limit_pct = 20.0 if is_chinext_star else 10.0
+                    if pct >= limit_pct - 0.1:
+                        logger.warning(
+                            "submit_buy_signal REJECTED: %s %s at %.1f%% "
+                            "(已涨停，无法买入)",
+                            symbol,
+                            name,
+                            pct,
+                        )
+                        return {
+                            "status": "rejected",
+                            "reason": (
+                                f"{name}({symbol})当前涨幅{pct:+.1f}%，"
+                                f"已涨停封板，散户排队也买不到。"
+                                f"建议：看同板块涨幅3-7%的票，"
+                                f"用 get_trend_candidates 找可买替代标的。"
+                            ),
+                            "symbol": symbol,
+                        }
+            except Exception:
+                pass  # Fail open — can't check quote, allow through
+
+            # --- Cash sufficiency check ---
+            try:
+                from src.web.dependencies import get_capital_service
+
+                cs = get_capital_service()
+                cash = cs.get_balance()
+                order_amt = shares * entry_price
+                if isinstance(cash, (int, float)) and order_amt > cash:
+                    return {
+                        "status": "rejected",
+                        "reason": (
+                            f"资金不足：买入需要¥{order_amt:,.0f}，"
+                            f"可用资金仅¥{cash:,.0f}。"
+                        ),
+                        "symbol": symbol,
+                    }
+            except Exception:
+                pass
+
+            state = agent._current_state
+            if state is None:
+                state = AgentState(
+                    date=datetime.now(UTC).strftime("%Y%m%d"),
+                )
+            decision_dict: dict[str, Any] = {
+                "type": "buy_signal",
+                "action": "buy",
+                "symbol": symbol,
+                "name": name,
+                "shares": shares,
+                "entry_price": entry_price,
+                "stop_loss": stop_loss,
+                "target_price": target_price,
+                "confidence": confidence,
+                "summary": summary,
+                "risk_note": risk_note,
+            }
+            if hold_days:
+                decision_dict["hold_days"] = hold_days
+            try:
+                ok = await decision_handler.push_single_decision(
+                    decision_dict, state, "tool_call"
+                )
+                if ok:
+                    return {
+                        "status": "accepted",
+                        "symbol": symbol,
+                        "action": "buy",
+                        "reflection": (
+                            f"买入信号已提交。在确认前反思一下：\n"
+                            f"1. 如果这笔交易亏了，最可能的原因是什么？\n"
+                            f"2. {name}的基本面是否支撑当前价格？\n"
+                            f"3. 你的置信度({confidence:.0%})是否过度自信？"
+                        ),
+                    }
+                return {
+                    "status": "rejected",
+                    "reason": "decision pipeline filtered this signal",
+                    "symbol": symbol,
+                }
+            except Exception as exc:
+                return {
+                    "status": "rejected",
+                    "reason": str(exc),
+                    "symbol": symbol,
+                }
+
+        self.register(
+            name="submit_buy_signal",
+            description=(
+                "提交买入信号。当你决定买入某只股票时调用此工具。"
+                "信号将经过风控校验（止损/目标/集中度/熔断器）后推送。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "股票代码，如 '600519'",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "股票名称，如 '贵州茅台'",
+                    },
+                    "shares": {
+                        "type": "integer",
+                        "description": "买入股数（100的整数倍）",
+                    },
+                    "entry_price": {
+                        "type": "number",
+                        "description": "建议买入价格（元）",
+                    },
+                    "stop_loss": {
+                        "type": "number",
+                        "description": "止损价格（元）",
+                    },
+                    "target_price": {
+                        "type": "number",
+                        "description": "目标价格（元）",
+                    },
+                    "hold_days": {
+                        "type": "integer",
+                        "description": "预计持有天数",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "置信度 0-1",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "买入理由（大白话）",
+                    },
+                    "risk_note": {
+                        "type": "string",
+                        "description": "主要风险提示",
+                    },
+                },
+                "required": [
+                    "symbol",
+                    "name",
+                    "shares",
+                    "entry_price",
+                    "stop_loss",
+                    "target_price",
+                    "confidence",
+                    "summary",
+                ],
+            },
+            handler=_handle_submit_buy,
+            is_async=True,
+        )
+
+        async def _handle_submit_sell(
+            symbol: str,
+            name: str,
+            shares: int,
+            confidence: float,
+            summary: str,
+            risk_note: str = "",
+        ) -> dict[str, Any]:
+            state = agent._current_state
+            if state is None:
+                state = AgentState(
+                    date=datetime.now(UTC).strftime("%Y%m%d"),
+                )
+            decision_dict: dict[str, Any] = {
+                "type": "sell_signal",
+                "action": "sell",
+                "symbol": symbol,
+                "name": name,
+                "shares": shares,
+                "confidence": confidence,
+                "summary": summary,
+                "risk_note": risk_note,
+            }
+            try:
+                ok = await decision_handler.push_single_decision(
+                    decision_dict, state, "tool_call"
+                )
+                if ok:
+                    return {
+                        "status": "accepted",
+                        "symbol": symbol,
+                        "action": "sell",
+                    }
+                return {
+                    "status": "rejected",
+                    "reason": "decision pipeline filtered this signal",
+                    "symbol": symbol,
+                }
+            except Exception as exc:
+                return {
+                    "status": "rejected",
+                    "reason": str(exc),
+                    "symbol": symbol,
+                }
+
+        self.register(
+            name="submit_sell_signal",
+            description=(
+                "提交卖出信号。当你决定卖出某只股票时调用此工具。信号将经过校验后推送。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "股票代码，如 '600519'",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "股票名称，如 '贵州茅台'",
+                    },
+                    "shares": {
+                        "type": "integer",
+                        "description": "卖出股数（100的整数倍）",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "置信度 0-1",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "卖出理由（大白话）",
+                    },
+                    "risk_note": {
+                        "type": "string",
+                        "description": "风险提示",
+                    },
+                },
+                "required": [
+                    "symbol",
+                    "name",
+                    "shares",
+                    "confidence",
+                    "summary",
+                ],
+            },
+            handler=_handle_submit_sell,
+            is_async=True,
+        )
+
+        async def _handle_submit_hold(
+            symbol: str,
+            name: str,
+            confidence: float,
+            summary: str,
+            stop_loss: float | None = None,
+            target_price: float | None = None,
+            risk_note: str = "",
+        ) -> dict[str, Any]:
+            state = agent._current_state
+            if state is None:
+                state = AgentState(
+                    date=datetime.now(UTC).strftime("%Y%m%d"),
+                )
+            decision_dict: dict[str, Any] = {
+                "type": "hold_update",
+                "action": "hold",
+                "symbol": symbol,
+                "name": name,
+                "confidence": confidence,
+                "summary": summary,
+                "risk_note": risk_note,
+            }
+            if stop_loss is not None:
+                decision_dict["stop_loss"] = stop_loss
+            if target_price is not None:
+                decision_dict["target_price"] = target_price
+
+            # Thesis drift warning — alert LLM when target_price drops
+            # significantly vs. the original buy thesis
+            result_extra = ""
+            try:
+                from src.web.dependencies import get_redis
+
+                r = get_redis()
+                if r and symbol:
+                    raw = r.get(f"thesis:{symbol}")
+                    if raw:
+                        thesis = json.loads(raw)
+                        orig_tp = thesis.get("target_price")
+                        new_tp = decision_dict.get("target_price")
+                        if orig_tp and new_tp and float(new_tp) < float(orig_tp):
+                            result_extra = (
+                                f" ⚠️ 目标价从{orig_tp}降到{new_tp}，大幅偏离原始计划"
+                            )
+            except Exception:
+                pass
+
+            try:
+                ok = await decision_handler.push_single_decision(
+                    decision_dict, state, "tool_call"
+                )
+                if ok:
+                    result: dict[str, Any] = {
+                        "status": "accepted",
+                        "symbol": symbol,
+                        "action": "hold",
+                    }
+                    if result_extra:
+                        result["warning"] = result_extra
+                    return result
+                return {
+                    "status": "rejected",
+                    "reason": "decision pipeline filtered this signal",
+                    "symbol": symbol,
+                }
+            except Exception as exc:
+                return {
+                    "status": "rejected",
+                    "reason": str(exc),
+                    "symbol": symbol,
+                }
+
+        self.register(
+            name="submit_hold_update",
+            description=(
+                "提交持有更新。当你判断继续持有时调用此工具，可以更新止损/目标价。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "股票代码，如 '600519'",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "股票名称，如 '贵州茅台'",
+                    },
+                    "stop_loss": {
+                        "type": "number",
+                        "description": "更新后的止损价格（元）",
+                    },
+                    "target_price": {
+                        "type": "number",
+                        "description": "更新后的目标价格（元）",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "置信度 0-1",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "持有理由（大白话）",
+                    },
+                    "risk_note": {
+                        "type": "string",
+                        "description": "风险提示",
+                    },
+                },
+                "required": [
+                    "symbol",
+                    "name",
+                    "confidence",
+                    "summary",
+                ],
+            },
+            handler=_handle_submit_hold,
+            is_async=True,
+        )
+
+        logger.info("Registered 3 decision expression tools (submit_buy/sell/hold)")
+
+
+def _load_skill(skill_name: str) -> str:
+    """Load a trading skill markdown file."""
+    from pathlib import Path
+
+    skills_dir = Path(__file__).parent.parent.parent / "agent_loop" / "skills"
+    path = skills_dir / f"{skill_name}.md"
+    if not path.exists():
+        available = (
+            [p.stem for p in skills_dir.glob("*.md")] if skills_dir.exists() else []
+        )
+        return json.dumps(
+            {"error": f"Unknown skill: {skill_name}", "available": available},
+            ensure_ascii=False,
+        )
+    return path.read_text(encoding="utf-8")
+
+
+def _get_belief_state() -> dict[str, Any]:
+    """Get SharedBeliefState as a dict."""
+    try:
+        from src.agent_loop.shared_belief_state import SharedBeliefState
+
+        state = SharedBeliefState()
+        return state.to_dict()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _detect_sentiment_phase() -> dict[str, Any]:
+    """Detect current sentiment cycle phase with full 7-dimension quantified data."""
+    try:
+        from src.agent_loop.sentiment_cycle import (
+            SentimentCycleDetector,
+            SentimentSignals,
+        )
+
+        signals = SentimentSignals()
+
+        # --- Signal 1: Limit-up pool (涨停池) ---
+        try:
+            from src.data.fetcher import StockDataFetcher
+
+            fetcher = StockDataFetcher()
+            pool = fetcher.fetch_limit_up_pool()
+            if pool is not None and not pool.empty:
+                signals.limit_up_count = len(pool)
+                # Signal 2: Max consecutive board (最高连板)
+                if "consecutive" in pool.columns:
+                    signals.max_consecutive_board = int(pool["consecutive"].max())
+                # Signal 6: Board break rate (炸板率)
+                if "break_count" in pool.columns:
+                    # 炸板率 = 有过开板的股票数 / 总涨停数（不是break_count总和）
+                    stocks_with_breaks = int((pool["break_count"] > 0).sum())
+                    signals.board_break_rate = float(stocks_with_breaks / len(pool))
+        except Exception:
+            pass
+
+        # --- Signal 3: Limit-down pool (跌停池) ---
+        try:
+            down_pool = fetcher.fetch_limit_down_pool()
+            if down_pool is not None and not down_pool.empty:
+                signals.limit_down_count = len(down_pool)
+        except Exception:
+            pass
+
+        # --- Signal 7: Promotion rate (晋级率) ---
+        try:
+            from src.data.consecutive_board import ConsecutiveBoardTracker
+
+            cbt = ConsecutiveBoardTracker()
+            snapshot = cbt.compute_snapshot()
+            if snapshot:
+                signals.promotion_1to2 = getattr(snapshot, "promotion_1to2", None)
+                signals.promotion_2to3 = getattr(snapshot, "promotion_2to3", None)
+        except Exception:
+            pass
+
+        # --- Signal 4: Volume change (成交量变化) ---
+        try:
+            idx_df = fetcher.fetch_index("000001")  # 上证综指
+            if idx_df is not None and not idx_df.empty and "volume" in idx_df.columns:
+                recent_vol = idx_df["volume"].iloc[-1]
+                avg_vol = idx_df["volume"].iloc[-20:].mean()
+                if avg_vol > 0:
+                    signals.volume_change_pct = float(
+                        (recent_vol - avg_vol) / avg_vol * 100
+                    )
+        except Exception:
+            pass
+
+        # --- Signal 5: Northbound flow (北向资金) ---
+        try:
+            from src.data.macro_flow_fetcher import MacroFlowFetcher
+
+            mf = MacroFlowFetcher()
+            nb = mf.fetch_northbound_today()
+            if nb and isinstance(nb, dict):
+                flow = nb.get("net_flow") or nb.get("net") or nb.get("net_buy_amount")
+                if flow is not None:
+                    signals.northbound_net_flow = float(flow)
+        except Exception:
+            pass
+
+        detector = SentimentCycleDetector()
+        phase = detector.detect(signals)
+        if hasattr(phase, "__dict__"):
+            return {k: v for k, v in phase.__dict__.items() if not k.startswith("_")}
+        return {"phase": str(phase)}
+    except Exception as exc:
+        return {"error": str(exc), "note": "Sentiment detection unavailable"}
+
+
+def _get_active_theses() -> list[dict[str, Any]]:
+    """Get all active investment theses."""
+    try:
+        from src.agent_loop.thesis_tracker import ThesisTracker
+
+        tracker = ThesisTracker()
+        theses = tracker.get_active()
+        if not theses:
+            return []
+        result = []
+        for t in theses:
+            if hasattr(t, "to_dict"):
+                result.append(t.to_dict())
+            elif isinstance(t, dict):
+                result.append(t)
+            else:
+                result.append({"data": str(t)})
+        return result
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+
+def _compute_overnight_transmission() -> dict[str, Any]:
+    """Compute overnight cross-market transmission scores for A-share sectors."""
+    try:
+        import yaml
+        from pathlib import Path
+
+        # Load transmission map — /app/config/ is 4 levels up from this file
+        config_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "config"
+            / "sector_transmission_map.yaml"
+        )
+        if not config_path.exists():
+            return {"error": "sector_transmission_map.yaml not found"}
+
+        with open(config_path, encoding="utf-8") as f:
+            tmap = yaml.safe_load(f)
+
+        # Fetch global market data
+        from src.web.dependencies import get_global_market_fetcher
+
+        fetcher = get_global_market_fetcher()
+        snapshot = fetcher.fetch_snapshot()
+        if not snapshot:
+            return {"error": "Global market data unavailable"}
+
+        # Extract key index moves
+        indices = {
+            i.get("name", ""): i.get("pct_change", 0) or 0
+            for i in snapshot.get("indices", [])
+        }
+        commodities = {
+            c.get("name", ""): c.get("pct_change", 0) or 0
+            for c in snapshot.get("commodities", [])
+        }
+        currencies = {
+            c.get("name", ""): c.get("pct_change", 0) or 0
+            for c in snapshot.get("currencies", [])
+        }
+
+        nasdaq_pct = indices.get("纳斯达克", 0)
+        sp500_pct = indices.get("标普500", 0)
+        dow_pct = indices.get("道琼斯", 0)
+        oil_pct = commodities.get("原油(WTI)", 0)
+        gold_pct = commodities.get("黄金", 0)
+        copper_pct = commodities.get("铜", 0)
+        dxy_pct = currencies.get("美元指数(DXY)", 0)
+
+        # Compute sector impact scores
+        sector_impacts: dict[str, float] = {}
+
+        # US equity transmission
+        us_eq = tmap.get("us_equity", {})
+        for index_name, index_pct, sectors in [
+            ("nasdaq", nasdaq_pct, us_eq.get("nasdaq", {})),
+            ("sp500", sp500_pct, us_eq.get("sp500", {})),
+            ("dowjones", dow_pct, us_eq.get("dowjones", {})),
+        ]:
+            for sector, cfg in sectors.items():
+                sens = cfg.get("sensitivity", 0)
+                direction = 1 if cfg.get("direction", "positive") == "positive" else -1
+                impact = index_pct * sens * direction
+                sector_impacts[sector] = sector_impacts.get(sector, 0) + impact
+
+        # Commodity transmission
+        comm = tmap.get("commodity", {})
+        for comm_name, comm_pct, sectors in [
+            ("原油", oil_pct, comm.get("原油", {})),
+            ("黄金", gold_pct, comm.get("黄金", {})),
+            ("铜", copper_pct, comm.get("铜", {})),
+        ]:
+            for sector, cfg in sectors.items():
+                sens = cfg.get("sensitivity", 0)
+                direction = 1 if cfg.get("direction", "positive") == "positive" else -1
+                impact = comm_pct * sens * direction
+                sector_impacts[sector] = sector_impacts.get(sector, 0) + impact
+
+        # Currency transmission
+        curr = tmap.get("currency", {})
+        for curr_name, curr_pct, sectors in [
+            ("美元指数", dxy_pct, curr.get("美元指数", {})),
+        ]:
+            for sector, cfg in sectors.items():
+                sens = cfg.get("sensitivity", 0)
+                direction = 1 if cfg.get("direction", "positive") == "positive" else -1
+                impact = curr_pct * sens * direction
+                sector_impacts[sector] = sector_impacts.get(sector, 0) + impact
+
+        # Sort by absolute impact
+        sorted_sectors = sorted(
+            sector_impacts.items(), key=lambda x: abs(x[1]), reverse=True
+        )
+
+        # Determine scenario
+        scenarios = tmap.get("scenarios", {})
+        scenario = "unknown"
+        us_avg = (nasdaq_pct + sp500_pct + dow_pct) / 3
+        if us_avg > 0.5 and oil_pct < -0.5 and dxy_pct < 0:
+            scenario = "risk_on"
+        elif us_avg < -0.5 and gold_pct > 0.5 and dxy_pct > 0:
+            scenario = "risk_off"
+        elif us_avg < -0.5 and oil_pct > 1 and gold_pct > 0:
+            scenario = "stagflation"
+        elif abs(us_avg) < 0.5 and abs(oil_pct) < 1:
+            scenario = "goldilocks"
+
+        scenario_info = scenarios.get(scenario, {})
+
+        result = {
+            "overnight_summary": {
+                "纳斯达克": f"{nasdaq_pct:+.2f}%",
+                "标普500": f"{sp500_pct:+.2f}%",
+                "道琼斯": f"{dow_pct:+.2f}%",
+                "原油WTI": f"{oil_pct:+.2f}%",
+                "黄金": f"{gold_pct:+.2f}%",
+                "美元指数": f"{dxy_pct:+.2f}%",
+            },
+            "scenario": scenario,
+            "scenario_description": scenario_info.get("description", ""),
+            "beneficiaries": scenario_info.get("beneficiaries", []),
+            "pressured": scenario_info.get("pressured", []),
+            "sector_impacts": [
+                {
+                    "sector": sector,
+                    "impact_score": round(impact, 2),
+                    "direction": "顺风" if impact > 0 else "逆风",
+                    "expected_move": f"{impact:+.1f}%",
+                }
+                for sector, impact in sorted_sectors
+                if abs(impact) > 0.1
+            ],
+        }
+        return result
+    except Exception as exc:
+        return {"error": f"Transmission analysis failed: {exc}"}
+
+
+def _get_outcome_stats(lookback_days: int = 30) -> dict[str, Any]:
+    """Get signal outcome accuracy statistics."""
+    try:
+        from src.agent_loop.outcome_tracker import OutcomeTracker
+
+        tracker = OutcomeTracker()
+        stats = tracker.get_accuracy_stats(lookback_days=lookback_days)
+        if isinstance(stats, dict):
+            return stats
+        return {"data": str(stats)}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _get_scanner_candidates(min_score: float = 50, top_n: int = 10) -> dict[str, Any]:
+    """Retrieve scored opportunity candidates from Redis (v57.0)."""
+    try:
+        import redis
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo
+
+        r = redis.Redis(host="redis", port=6379, db=0, decode_responses=True)
+        date = _dt.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+        key = f"scanner:candidates:{date}"
+
+        raw = r.zrevrangebyscore(
+            key, "+inf", str(min_score), withscores=True, start=0, num=top_n
+        )
+
+        candidates = []
+        for member, score in raw:
+            data = json.loads(member)
+            data["total_score"] = round(score, 1)
+            candidates.append(data)
+
+        if not candidates:
+            return {
+                "message": "今日暂无扫描结果（可能市场未开盘或涨停数过少）",
+                "candidates": [],
+            }
+
+        return {"count": len(candidates), "candidates": candidates}
+    except Exception as exc:
+        return {"error": f"获取扫描结果失败: {exc}", "candidates": []}
+
+
+def _handle_deep_analyze(symbol: str, stock_name: str = "") -> dict[str, Any]:
+    """Build full MarketSnapshot + run LLM decision for a symbol.
+
+    Returns the same quality of analysis as InvestmentDirector.coordinate_cycle().
+
+    Runs ContextBuilder.build() in a separate thread to avoid event loop
+    conflicts (this function is called from the sync tool executor which
+    itself runs inside an async context).
+    """
+    import concurrent.futures
+
+    from src.agent_loop.market_snapshot import ContextBuilder
+
+    # Resolve stock name if not provided
+    if not stock_name:
+        try:
+            from src.web.dependencies import get_stock_service
+
+            info = get_stock_service().get_stock_info(symbol)
+            stock_name = info.get("name", symbol) if info else symbol
+        except Exception:
+            stock_name = symbol
+
+    # Use FastAPI DI singletons instead of creating fresh instances.
+    # This ensures shared caches, state, and correct portfolio context.
+    builder_kwargs: dict[str, Any] = {}
+    _di_getters = [
+        ("realtime", "get_realtime_quote_manager"),
+        ("minute_bar_fetcher", "get_minute_bar_fetcher"),
+        ("mtf_engine", "get_mtf_engine"),
+        ("reflexivity_detector", "get_reflexivity_detector"),
+        ("alpha_engine", "get_qlib_alpha_engine"),
+        ("macro_flow_fetcher", "get_macro_flow_fetcher"),
+        ("info_store", "get_info_store"),
+        ("sentiment_detector", "get_sentiment_cycle_detector"),
+        ("portfolio_store", "get_portfolio_store"),
+        ("convergence_engine", "get_convergence_engine"),
+        ("thesis_tracker", "get_thesis_tracker"),
+    ]
+    from src.web import dependencies as _deps
+
+    for kwarg_name, getter_name in _di_getters:
+        try:
+            getter = getattr(_deps, getter_name, None)
+            if getter:
+                builder_kwargs[kwarg_name] = getter()
+        except Exception:
+            pass
+
+    # Bayesian engine from DecisionPipeline DI
+    try:
+        pipeline = _deps.get_decision_pipeline()
+        builder_kwargs["bayesian_engine"] = pipeline._bayesian
+    except Exception:
+        pass
+
+    # Non-DI sources (no singleton getter — create fresh instances)
+    for kwarg_name, module_path, class_name in [
+        ("vpin_calculator", "src.quant.vpin", "VpinCalculator"),
+        ("vwap_engine", "src.quant.vwap_trigger", "VwapTriggerEngine"),
+        (
+            "pattern_detector",
+            "src.agent_loop.intraday_patterns",
+            "IntradayPatternDetector",
+        ),
+        ("gdelt_fetcher", "src.data.gdelt_fetcher", "GdeltFetcher"),
+        ("fred_fetcher", "src.data.fred_fetcher", "FredFetcher"),
+        ("polymarket_fetcher", "src.data.polymarket_fetcher", "PolymarketFetcher"),
+        ("cninfo_fetcher", "src.data.cninfo_announcement", "CninfoAnnouncementFetcher"),
+        ("lockup_fetcher", "src.data.lockup_expiry", "LockupExpiryFetcher"),
+        ("block_trade_fetcher", "src.data.block_trade", "BlockTradeFetcher"),
+        ("insider_fetcher", "src.data.insider_activity", "InsiderActivityFetcher"),
+        ("earnings_fetcher", "src.data.earnings_forecast", "EarningsForecastFetcher"),
+    ]:
+        try:
+            mod = __import__(module_path, fromlist=[class_name])
+            builder_kwargs[kwarg_name] = getattr(mod, class_name)()
+        except Exception:
+            pass
+
+    # Run async ContextBuilder.build() in a fresh thread with its own event loop
+    import asyncio as _aio
+
+    async def _build_snapshot():
+        builder = ContextBuilder(**builder_kwargs)
+        return await builder.build(symbol, stock_name)
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            snapshot = pool.submit(_aio.run, _build_snapshot()).result(timeout=80)
+    except Exception as exc:
+        logger.error("deep_analyze ContextBuilder failed for %s: %s", symbol, exc)
+        return {
+            "symbol": symbol,
+            "error": f"Snapshot build failed: {exc}",
+            "snapshot_text": "",
+        }
+
+    snapshot_text = snapshot.serialize_for_llm()
+
+    # No inner LLM call — the outer agent LLM receives snapshot_text
+    # and does its own reasoning. This avoids:
+    # 1. Redundant LLM call (60s timeout, doubles latency)
+    # 2. Google API 'dict has no attribute role' format mismatch
+    # 3. Double token cost for the same analysis
+
+    result: dict[str, Any] = {
+        "symbol": symbol,
+        "name": stock_name,
+        "snapshot_text": snapshot_text,
+    }
+
+    # Attach key numeric fields for quick access
+    if snapshot.current_price is not None:
+        result["current_price"] = snapshot.current_price
+    if snapshot.price_change_pct is not None:
+        result["change_pct"] = snapshot.price_change_pct
+    if snapshot.bayesian_posterior is not None:
+        result["bayesian_posterior"] = snapshot.bayesian_posterior
+    if snapshot.convergence_score is not None:
+        result["convergence_score"] = snapshot.convergence_score
+
+    return result
 
 
 def _handle_impact_chain(event_text: str) -> dict[str, Any]:
@@ -1630,3 +3483,246 @@ def _serialize(obj: Any) -> str:
         return json.dumps(obj.dict(), ensure_ascii=False, default=str)
 
     return json.dumps({"result": str(obj)}, ensure_ascii=False)
+
+
+def _get_market_pulse() -> dict[str, Any]:
+    """Lightweight market snapshot for heartbeat agent.
+
+    Returns indices, portfolio P&L, capital, sector rotation, scanner candidates.
+    Uses StockDataFetcher (reliable) instead of RealtimeQuoteManager.
+    Cached in Redis for 120s to avoid redundant fetches within a heartbeat.
+    """
+    from datetime import datetime as _dt
+
+    # Check Redis cache first (120s TTL)
+    _cache_key = "market_pulse:cache"
+    try:
+        from src.web.dependencies import get_redis as _get_redis
+
+        _r = _get_redis()
+        if _r:
+            cached = _r.get(_cache_key)
+            if cached:
+                return json.loads(cached)
+    except Exception:
+        _r = None
+
+    pulse: dict[str, Any] = {"timestamp": _dt.now().isoformat()}
+
+    # 1. Major indices + held stock quotes via EastMoneyClient (fast batch API)
+    try:
+        from src.data.eastmoney_client import EastMoneyClient
+
+        em = EastMoneyClient()
+        # Indices use special codes: 000001(上证), 399001(深成), 399006(创业板)
+        index_quotes = em.fetch_batch_quotes(["000001", "399001", "399006"])
+        if index_quotes:
+            indices = {}
+            for q in index_quotes:
+                indices[q.get("name", q.get("symbol", "?"))] = {
+                    "price": q.get("price"),
+                    "change_pct": q.get("pct_change"),
+                }
+            pulse["indices"] = indices
+        else:
+            pulse["indices"] = {"error": "数据暂不可用"}
+    except Exception as exc:
+        pulse["indices"] = {"error": str(exc)}
+
+    # 2. Portfolio positions with LIVE P&L
+    try:
+        from src.web.dependencies import get_capital_service, get_portfolio_store
+
+        ps = get_portfolio_store()
+        if ps:
+            positions = ps.list_positions()
+            if positions:
+                # Fetch live quotes for held stocks
+                held_symbols = [p.get("symbol") for p in positions if p.get("symbol")]
+                live_quotes = {}
+                if held_symbols:
+                    try:
+                        from src.data.eastmoney_client import EastMoneyClient
+
+                        em = EastMoneyClient()
+                        batch = em.fetch_batch_quotes(held_symbols)
+                        for q in batch or []:
+                            sym = q.get("symbol", "")
+                            live_quotes[sym] = {
+                                "price": q.get("price"),
+                                "pct_change": q.get("pct_change"),
+                            }
+                    except Exception:
+                        pass
+
+                portfolio_items = []
+                total_pnl = 0.0
+                total_value = 0.0
+                for p in positions:
+                    sym = p.get("symbol", "")
+                    cost = p.get("cost_price", 0) or 0
+                    shares = p.get("shares", 0) or 0
+                    live = live_quotes.get(sym, {})
+                    current_price = live.get("price") or cost
+                    today_change = live.get("pct_change")
+                    pnl_pct = ((current_price - cost) / cost * 100) if cost > 0 else 0
+                    pnl_amount = (current_price - cost) * shares
+
+                    total_pnl += pnl_amount
+                    total_value += current_price * shares
+
+                    portfolio_items.append(
+                        {
+                            "symbol": sym,
+                            "name": p.get("name", ""),
+                            "shares": shares,
+                            "cost": round(cost, 2),
+                            "current_price": round(current_price, 2),
+                            "today_change_pct": round(today_change, 2)
+                            if today_change
+                            else None,
+                            "pnl_pct": round(pnl_pct, 2),
+                            "pnl_amount": round(pnl_amount, 0),
+                        }
+                    )
+
+                pulse["portfolio"] = {
+                    "position_count": len(positions),
+                    "total_value": round(total_value, 0),
+                    "total_pnl": round(total_pnl, 0),
+                    "positions": portfolio_items,
+                }
+            else:
+                pulse["portfolio"] = {"position_count": 0, "positions": []}
+
+        # 2b. Capital
+        cs = get_capital_service()
+        if cs:
+            try:
+                balance = cs.get_balance()
+                cash = float(balance) if isinstance(balance, (int, float)) else 0
+                pulse["capital"] = {
+                    "available_cash": round(cash, 2),
+                    "total_assets": round(cash + total_value, 2),
+                }
+            except Exception:
+                pass
+    except Exception as exc:
+        pulse["portfolio"] = {"error": str(exc)}
+
+    # 3. Sector rotation from cache
+    try:
+        from src.web.dependencies import get_redis
+
+        r = get_redis()
+        if r:
+            cached = r.get("sector_flow:rotation")
+            if cached:
+                rotation = json.loads(cached)
+                pulse["sector_rotation"] = {
+                    "top_in": [
+                        s.get("sector", "") for s in rotation.get("rotating_in", [])[:5]
+                    ],
+                    "top_out": [
+                        s.get("sector", "")
+                        for s in rotation.get("rotating_out", [])[:3]
+                    ],
+                }
+    except Exception:
+        pass
+
+    # 4. Recent scanner candidates (top 5)
+    try:
+        from src.web.dependencies import get_redis
+
+        r = get_redis()
+        if r:
+            date_key = _dt.now().strftime("%Y%m%d")
+            candidates = r.zrevrange(
+                f"scanner:candidates:{date_key}", 0, 4, withscores=True
+            )
+            if candidates:
+                pulse["top_candidates"] = []
+                for raw, score in candidates:
+                    try:
+                        c = json.loads(raw)
+                        pulse["top_candidates"].append(
+                            {
+                                "symbol": c.get("symbol"),
+                                "name": c.get("name"),
+                                "score": round(score, 1),
+                                "reason": c.get("reason", "")[:80],
+                            }
+                        )
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+    except Exception:
+        pass
+
+    # Cache result in Redis (120s TTL)
+    try:
+        if _r:
+            _r.set(
+                _cache_key, json.dumps(pulse, ensure_ascii=False, default=str), ex=120
+            )
+    except Exception:
+        pass
+
+    return pulse
+
+
+def _get_limit_up_pool() -> dict[str, Any]:
+    """Get today's limit-up (涨停) stock pool."""
+    try:
+        from src.data.fetcher import StockDataFetcher
+
+        fetcher = StockDataFetcher()
+        df = fetcher.fetch_limit_up_pool()
+        if df is None or df.empty:
+            return {"stocks": [], "count": 0}
+
+        stocks = []
+        for _, row in df.head(30).iterrows():
+            stocks.append(
+                {
+                    "symbol": row.get("symbol", ""),
+                    "name": row.get("name", ""),
+                    "pct_change": row.get("pct_change"),
+                    "price": row.get("price"),
+                    "seal_amount": row.get("seal_amount"),
+                    "first_seal_time": str(row.get("first_seal_time", "")),
+                    "break_count": row.get("break_count", 0),
+                    "consecutive": row.get("consecutive", 1),
+                    "industry": row.get("industry", ""),
+                }
+            )
+        return {"stocks": stocks, "count": len(df)}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _get_sector_leaders(top_n: int = 5) -> dict[str, Any]:
+    """Get top sectors by capital inflow with leader stocks."""
+    try:
+        from src.data.intraday_sector_flow import IntradaySectorFlowTracker
+
+        tracker = IntradaySectorFlowTracker()
+        flow_list = tracker.fetch_current_flow()
+        if not flow_list:
+            return {"sectors": [], "error": "no_data"}
+
+        # Already sorted by net_inflow descending from fetch_current_flow
+        sectors = []
+        for s in flow_list[:top_n]:
+            sectors.append(
+                {
+                    "sector": s.get("sector", ""),
+                    "net_inflow": s.get("net_inflow"),
+                    "change_pct": s.get("change_pct"),
+                    "leader_stock": s.get("leader_stock", ""),
+                    "leader_change": s.get("leader_change"),
+                }
+            )
+        return {"sectors": sectors}
+    except Exception as exc:
+        return {"error": str(exc)}

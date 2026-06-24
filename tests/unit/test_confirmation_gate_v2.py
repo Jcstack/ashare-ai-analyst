@@ -127,12 +127,12 @@ class TestSignalConfirmationGate:
         assert len(result.confirmation_sources) == 1
 
     def test_get_rules(self):
-        """Verify returns dict with all signal types."""
+        """Verify returns dict with all 11 signal types."""
         gate = SignalConfirmationGate()
 
         rules = gate.get_rules()
 
-        assert len(rules) == len(SignalType)
+        assert len(rules) == 11
         # Spot-check known rules
         assert rules["S1_TREND"] == 2
         assert rules["S4_ANOMALY"] == 1

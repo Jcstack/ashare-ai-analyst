@@ -135,7 +135,7 @@ class CapitalFlowService:
 
         Args:
             sector_type: "industry" for 申万一级 or "concept" for concept boards.
-            period: One of "today", "3d", "5d", "10d".
+            period: One of "today", "3d" (→5d fallback), "5d", "10d".
 
         Returns:
             Dict matching SectorFlowResponse schema.

@@ -1,0 +1,236 @@
+# Impact Chain Templates — A-share event type → causal chain mappings
+#
+# Each template defines:
+#   event_pattern: regex to match event text (Chinese + English)
+#   trigger_type: category for the event
+#   chain: ordered list of impact links with confidence decay
+#
+# Special sector values:
+#   _from_event: extract sectors from event metadata
+#   _from_knowledge_graph: (future) query knowledge graph
+
+templates:
+  fed_rate_cut:
+    event_pattern: "美联储.*降息|Fed.*cut|联邦基金利率.*下调"
+    trigger_type: monetary
+    chain:
+      - order: 1
+        impact: "人民币升值预期"
+        sectors: ["消费", "科技"]
+        direction: bullish
+        confidence_decay: 0.9
+      - order: 2
+        impact: "外资回流A股"
+        sectors: ["北向重仓股"]
+        direction: bullish
+        confidence_decay: 0.75
+      - order: 3
+        impact: "流动性改善估值扩张"
+        sectors: ["成长股", "中小盘"]
+        direction: bullish
+        confidence_decay: 0.5
+
+  pboc_rrr_cut:
+    event_pattern: "降准|存款准备金率.*下调|央行.*释放流动性"
+    trigger_type: monetary
+    chain:
+      - order: 1
+        impact: "银行净息差改善"
+        sectors: ["银行", "金融"]
+        direction: bullish
+        confidence_decay: 0.9
+      - order: 2
+        impact: "地产融资成本下降"
+        sectors: ["地产", "建材"]
+        direction: bullish
+        confidence_decay: 0.7
+      - order: 3
+        impact: "消费信贷宽松"
+        sectors: ["消费", "汽车"]
+        direction: bullish
+        confidence_decay: 0.5
+
+  geopolitical_conflict:
+    event_pattern: "战争|冲突|军事行动|military|war|制裁|sanctions"
+    trigger_type: geopolitical
+    chain:
+      - order: 1
+        impact: "避险情绪升温"
+        sectors: ["黄金", "军工", "石油"]
+        direction: bullish
+        confidence_decay: 0.85
+      - order: 2
+        impact: "风险资产承压"
+        sectors: ["科技", "消费", "地产"]
+        direction: bearish
+        confidence_decay: 0.65
+
+  geopolitical_deescalation:
+    event_pattern: "停战|停火|ceasefire|和平.*谈判|peace.*negotiation|peace.*deal|和平协议|缓和|外交.*突破"
+    trigger_type: geopolitical
+    chain:
+      - order: 1
+        impact: "避险资产回落（黄金/军工卖出）"
+        sectors: ["黄金", "军工"]
+        direction: bearish
+        confidence_decay: 0.85
+      - order: 2
+        impact: "油价下跌预期（供应恢复）"
+        sectors: ["航空", "化工", "物流"]
+        direction: bullish
+        confidence_decay: 0.75
+      - order: 3
+        impact: "风险偏好回升（成长股受益）"
+        sectors: ["科技", "消费", "新能源"]
+        direction: bullish
+        confidence_decay: 0.6
+
+  industry_subsidy:
+    event_pattern: "产业政策|补贴|国家.*支持|专项资金|税收优惠"
+    trigger_type: regulatory
+    chain:
+      - order: 1
+        impact: "直接受益标的"
+        sectors: ["_from_event"]
+        direction: bullish
+        confidence_decay: 0.9
+      - order: 2
+        impact: "供应链上下游"
+        sectors: ["_from_knowledge_graph"]
+        direction: bullish
+        confidence_decay: 0.6
+
+  trade_war:
+    event_pattern: "关税|贸易战|trade war|tariff|进出口.*限制"
+    trigger_type: geopolitical
+    chain:
+      - order: 1
+        impact: "出口承压"
+        sectors: ["出口", "电子", "纺织"]
+        direction: bearish
+        confidence_decay: 0.85
+      - order: 2
+        impact: "国产替代受益"
+        sectors: ["半导体", "软件", "信创"]
+        direction: bullish
+        confidence_decay: 0.7
+      - order: 3
+        impact: "内需消费对冲"
+        sectors: ["消费", "食品饮料"]
+        direction: bullish
+        confidence_decay: 0.5
+
+  tech_breakthrough:
+    event_pattern: "技术突破|重大发现|首次实现|世界领先|国产.*成功"
+    trigger_type: industry
+    chain:
+      - order: 1
+        impact: "直接受益公司"
+        sectors: ["_from_event"]
+        direction: bullish
+        confidence_decay: 0.9
+      - order: 2
+        impact: "产业链受益"
+        sectors: ["_from_knowledge_graph"]
+        direction: bullish
+        confidence_decay: 0.6
+
+  regulatory_tightening:
+    event_pattern: "监管.*加强|整顿|处罚|限制.*政策|合规.*要求"
+    trigger_type: regulatory
+    chain:
+      - order: 1
+        impact: "直接受影响行业"
+        sectors: ["_from_event"]
+        direction: bearish
+        confidence_decay: 0.9
+      - order: 2
+        impact: "合规成本增加"
+        sectors: ["_from_event"]
+        direction: bearish
+        confidence_decay: 0.7
+
+  natural_disaster:
+    event_pattern: "地震|洪水|台风|自然灾害|极端天气"
+    trigger_type: macro
+    chain:
+      - order: 1
+        impact: "灾后重建需求"
+        sectors: ["建材", "基建", "工程机械"]
+        direction: bullish
+        confidence_decay: 0.7
+      - order: 2
+        impact: "保险赔付压力"
+        sectors: ["保险"]
+        direction: bearish
+        confidence_decay: 0.6
+
+  earnings_surprise:
+    event_pattern: "业绩.*超预期|净利润.*增长.*超|营收.*大幅增长"
+    trigger_type: company
+    chain:
+      - order: 1
+        impact: "个股估值重估"
+        sectors: ["_from_event"]
+        direction: bullish
+        confidence_decay: 0.95
+      - order: 2
+        impact: "同行估值拉升"
+        sectors: ["_from_event"]
+        direction: bullish
+        confidence_decay: 0.5
+
+  liquidity_crisis:
+    event_pattern: "流动性.*危机|钱荒|资金.*紧张|Shibor.*飙升"
+    trigger_type: monetary
+    chain:
+      - order: 1
+        impact: "高杠杆标的承压"
+        sectors: ["地产", "金融"]
+        direction: bearish
+        confidence_decay: 0.9
+      - order: 2
+        impact: "避险资产受益"
+        sectors: ["国债", "黄金", "银行"]
+        direction: bullish
+        confidence_decay: 0.7
+
+  oil_surge:
+    event_pattern: "原油.*大涨|油价.*飙升|OPEC.*减产|石油.*供应"
+    trigger_type: commodity
+    chain:
+      - order: 1
+        impact: "炼化利润扩大"
+        sectors: ["石油", "炼化"]
+        direction: bullish
+        confidence_decay: 0.9
+      - order: 2
+        impact: "航运成本上升"
+        sectors: ["航运", "物流"]
+        direction: bearish
+        confidence_decay: 0.7
+      - order: 3
+        impact: "新能源替代预期"
+        sectors: ["光伏", "风电", "新能源"]
+        direction: bullish
+        confidence_decay: 0.5
+
+  pboc_rate_cut:
+    event_pattern: "LPR.*下调|MLF.*降息|央行.*降息|利率.*下调"
+    trigger_type: monetary
+    chain:
+      - order: 1
+        impact: "地产融资成本下降"
+        sectors: ["地产", "建材"]
+        direction: bullish
+        confidence_decay: 0.9
+      - order: 2
+        impact: "银行净息差承压"
+        sectors: ["银行"]
+        direction: bearish
+        confidence_decay: 0.75
+      - order: 3
+        impact: "消费信贷宽松"
+        sectors: ["消费", "汽车"]
+        direction: bullish
+        confidence_decay: 0.6

@@ -39,8 +39,11 @@ from src.web.services.tool_registry import ToolRegistry
 logger = get_logger("web.agent_service")
 
 _DB_PATH = Path("data/agent.db")
-_MAX_TOOL_ROUNDS = 10
-_MAX_LOOP_SECONDS = 900  # 15 min — Claude backend needs generous budget
+_MAX_TOOL_ROUNDS = 5
+_MAX_LOOP_SECONDS = (
+    300  # 5 min — deep portfolio analysis needs multiple deep_analyze calls
+)
+_MAX_LLM_TOOLS_PER_REQUEST = 2  # Budget: max inner LLM calls per agent loop
 
 # Type alias for optional agent registry
 AgentRegistryType = Any
@@ -153,11 +156,69 @@ class AgentService:
         )
         return thread_id, reply
 
+    def create_thread_background(
+        self,
+        message: str,
+        context: ThreadContext | None = None,
+        persona: str | None = None,
+    ) -> str:
+        """Create a thread record in 'processing' state for background work.
+
+        PRD v50 aligned: returns immediately, agent loop runs in background.
+        Frontend polls GET /threads/:id for completion.
+
+        Returns:
+            The new thread_id.
+        """
+        title = message[:50].strip()
+        if len(message) > 50:
+            title += "..."
+        thread_id = self.create_thread_only(title, context, persona)
+        self._set_thread_status(thread_id, "processing")
+        return thread_id
+
+    async def process_thread_background(
+        self,
+        thread_id: str,
+        message: str,
+        use_multi_agent: bool = False,
+    ) -> None:
+        """Process a thread message in background. Updates status on completion."""
+        try:
+            await self.send_message(
+                thread_id,
+                message,
+                use_multi_agent=use_multi_agent,
+                _skip_user_save=True,  # User msg already saved by route
+            )
+            self._set_thread_status(thread_id, "ready")
+        except Exception as exc:
+            logger.exception("Background thread processing failed: %s", exc)
+            self._set_thread_status(thread_id, "error")
+
+    def _set_thread_status(self, thread_id: str, status: str) -> None:
+        """Update the processing_status of a thread."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE threads SET processing_status = ?, updated_at = ? WHERE id = ?",
+                (status, _now_iso(), thread_id),
+            )
+
+    def get_thread_status(self, thread_id: str) -> str | None:
+        """Get the processing status of a thread."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT processing_status FROM threads WHERE id = ?",
+                (thread_id,),
+            ).fetchone()
+        return row[0] if row else None
+
     async def send_message(
         self,
         thread_id: str,
         message: str,
         use_multi_agent: bool = False,
+        _skip_user_save: bool = False,
     ) -> ChatMessage:
         """Send a user message and get the agent reply.
 
@@ -168,20 +229,25 @@ class AgentService:
         4. Extract rich cards
         5. Persist messages
 
+        Args:
+            _skip_user_save: If True, skip saving user message (already saved
+                by background processing path).
+
         Returns:
             The agent's reply ChatMessage.
         """
         now = _now_iso()
 
-        # Save user message
-        user_msg_id = str(uuid.uuid4())
-        user_msg = ChatMessage(
-            id=user_msg_id,
-            role="user",
-            content=message,
-            timestamp=now,
-        )
-        self._save_message(thread_id, user_msg)
+        # Save user message (skipped in background path where it's pre-saved)
+        if not _skip_user_save:
+            user_msg_id = str(uuid.uuid4())
+            user_msg = ChatMessage(
+                id=user_msg_id,
+                role="user",
+                content=message,
+                timestamp=now,
+            )
+            self._save_message(thread_id, user_msg)
 
         # Multi-agent path: delegate to MasterAgent orchestrator
         if use_multi_agent and self._agent_registry:
@@ -200,23 +266,28 @@ class AgentService:
         if should_route and auto_persona:
             return await self._send_claude_code(thread_id, message, auto_persona)
 
-        # ── Gemini tool loop (existing behavior, unchanged) ────────
-        # Load conversation history for LLM
+        # ── Tool loop (text-based tool_use via complete()) ──────────
+        # Gemini Web does not support structured tool_use. We embed tool
+        # definitions in the prompt and parse tool calls from text output.
         history = self._load_history(thread_id)
         system_prompt = self._build_system_prompt(thread_id, user_message=message)
 
-        llm_messages = [LLMMessage(role="system", content=system_prompt)]
+        # Embed tool definitions in system prompt for text-based tool use
+        tool_definitions = self._tools.get_tool_definitions()
+        tool_instruction = self._build_tool_instruction(tool_definitions)
+        system_with_tools = system_prompt + "\n\n" + tool_instruction
+
+        llm_messages = [LLMMessage(role="system", content=system_with_tools)]
         for msg in history:
             llm_messages.append(LLMMessage(role=msg.role, content=msg.content))
 
-        # Tool loop
-        tool_definitions = self._tools.get_tool_definitions()
         tool_records: list[ToolCallRecord] = []
+        _tool_results_data: list[dict[str, Any]] = []
+        _llm_tool_count = 0  # Track inner LLM tool calls for budget
         final_text: str | None = None
         loop_start = time.perf_counter()
 
         for _round in range(_MAX_TOOL_ROUNDS):
-            # Check wall-clock budget before each LLM call
             elapsed_total = time.perf_counter() - loop_start
             if elapsed_total > _MAX_LOOP_SECONDS:
                 logger.warning(
@@ -228,20 +299,21 @@ class AgentService:
                 final_text = await self._summarize_on_timeout(llm_messages)
                 break
 
-            # Run synchronous LLM call in a thread to avoid blocking
-            # the uvicorn event loop (calls can take 10-60+ seconds)
-            response: LLMToolResponse = await asyncio.to_thread(
-                self._llm.complete_with_tools,
+            response = await asyncio.to_thread(
+                self._llm.complete,
                 messages=llm_messages,
-                tools=tool_definitions,
                 caller="agent_service.send_message",
                 max_tokens=16384,
                 temperature=0.3,
                 analysis_type="agent_chat",
             )
 
-            if response.stop_reason == "end_turn" or not response.tool_calls:
-                final_text = response.text or ""
+            # Parse tool calls from text response
+            parsed_calls = self._parse_tool_calls_from_text(response.text)
+
+            if not parsed_calls:
+                # No tool calls — this is the final response
+                final_text = self._strip_tool_call_blocks(response.text)
                 if not final_text.strip():
                     logger.warning(
                         "LLM returned empty text at round %d, summarizing", _round
@@ -249,62 +321,96 @@ class AgentService:
                     final_text = await self._summarize_on_timeout(llm_messages)
                 break
 
-            # Process tool calls
-            # Use raw provider content if available (preserves thought_signature etc.)
-            # Otherwise reconstruct from our ToolCall objects
-            if response.raw_assistant_content is not None:
-                assistant_content = response.raw_assistant_content
-            else:
-                assistant_blocks: list[dict[str, Any]] = []
-                if response.text:
-                    assistant_blocks.append({"type": "text", "text": response.text})
-                for tc in response.tool_calls:
-                    assistant_blocks.append(
-                        {
-                            "type": "tool_use",
-                            "id": tc.id,
-                            "name": tc.name,
-                            "input": tc.input,
-                        }
+            # Strip non-tool-call text from the assistant response before
+            # appending to history.  Gemini sometimes generates hallucinated
+            # analysis alongside tool_call tags; keeping that text pollutes
+            # the context and the final answer may echo the wrong numbers.
+            tool_call_only = "\n".join(
+                m.group(0)
+                for m in re.finditer(
+                    r"<tool_call>.*?</tool_call>", response.text, re.DOTALL
+                )
+            )
+            llm_messages.append(
+                LLMMessage(
+                    role="assistant",
+                    content=tool_call_only or response.text,
+                )
+            )
+
+            # Execute parsed tool calls concurrently (I-107 fix)
+            # Budget enforcement: skip LLM-backed tools beyond budget
+            tool_result_parts: list[str] = []
+            filtered_calls: list[dict] = []
+            for call in parsed_calls:
+                tname = call.get("name", "")
+                if (
+                    self._tools.is_llm_backed(tname)
+                    and _llm_tool_count >= _MAX_LLM_TOOLS_PER_REQUEST
+                ):
+                    tool_result_parts.append(
+                        f'<tool_result name="{tname}">\n'
+                        f'{{"note": "已达到本轮深度分析上限，请基于已有数据回答。"}}\n'
+                        f"</tool_result>"
                     )
-                assistant_content = assistant_blocks
+                    continue
+                if self._tools.is_llm_backed(tname):
+                    _llm_tool_count += 1
+                filtered_calls.append(call)
 
-            llm_messages.append(LLMMessage(role="assistant", content=assistant_content))
+            # Run all filtered tool calls in parallel
+            call_tuples = [
+                (c.get("name", ""), c.get("input", {})) for c in filtered_calls
+            ]
+            batch_start = time.perf_counter()
+            results = (
+                await self._tools.execute_parallel(call_tuples) if call_tuples else []
+            )
+            batch_elapsed = time.perf_counter() - batch_start
 
-            # Execute tools and build tool_result message
-            tool_results: list[dict[str, Any]] = []
-            for tc in response.tool_calls:
-                start = time.perf_counter()
-                result_str = await self._tools.execute(tc.name, tc.input)
-                elapsed = (time.perf_counter() - start) * 1000
+            for call, result_str in zip(filtered_calls, results):
+                tool_name = call.get("name", "")
+                tool_input = call.get("input", {})
+                # Approximate per-tool timing from batch
+                elapsed = (batch_elapsed / max(len(results), 1)) * 1000
 
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "tool_name": tc.name,
-                        "content": result_str,
-                    }
+                tool_result_parts.append(
+                    f'<tool_result name="{tool_name}">\n{result_str}\n</tool_result>'
                 )
                 tool_records.append(
                     ToolCallRecord(
-                        tool_name=tc.name,
-                        input=tc.input,
+                        tool_name=tool_name,
+                        input=tool_input,
                         output_summary=result_str[:200],
                         duration_ms=elapsed,
                     )
                 )
 
-                # Record lineage for this tool call
+                _tool_results_data.append(
+                    {
+                        "tool_name": tool_name,
+                        "input": tool_input,
+                        "result": result_str,
+                    }
+                )
+
                 self._record_tool_lineage(
-                    tc.name,
-                    tc.input,
+                    tool_name,
+                    tool_input,
                     result_str,
                     thread_id,
                     elapsed,
                 )
 
-            llm_messages.append(LLMMessage(role="user", content=tool_results))
+            # Feed tool results back as user message with data-binding instruction
+            results_text = "\n\n".join(tool_result_parts)
+            results_text += (
+                "\n\n⚠️ **数据约束（必须遵守）**：以上 tool_result 是实时真实数据。"
+                "你的回复中所有股价、涨跌幅、成交量、资金流向等数字必须且只能来自上述 tool_result。"
+                "禁止使用你训练数据中的任何历史股价。如果 tool_result 中没有某项数据，"
+                "说明'该数据暂不可用'，不得编造。"
+            )
+            llm_messages.append(LLMMessage(role="user", content=results_text))
         else:
             # Hit max rounds without end_turn
             final_text = response.text or ""
@@ -316,8 +422,14 @@ class AgentService:
                 thread_id,
             )
 
+        # Validate LLM output against real tool data
+        final_text = self._validate_output(final_text, _tool_results_data)
+
         # Extract rich cards from reply
         rich_cards = self._extract_rich_cards(final_text)
+
+        # Record structured decision journal for trade signals
+        self._record_decision_journal(thread_id, rich_cards, final_text, tool_records)
 
         # Auto-save trade_decision cards as recommendations + predictions
         if self._trade_service and rich_cards:
@@ -496,7 +608,8 @@ class AgentService:
         """Load a thread with all its messages."""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, title, context, created_at, updated_at, persona "
+                "SELECT id, title, context, created_at, updated_at, persona,"
+                " processing_status "
                 "FROM threads WHERE id = ?",
                 (thread_id,),
             ).fetchone()
@@ -521,6 +634,7 @@ class AgentService:
             persona=row[5],
             created_at=row[3],
             updated_at=row[4],
+            processing_status=row[6] or "ready",
         )
 
     def delete_thread(self, thread_id: str) -> bool:
@@ -689,6 +803,325 @@ class AgentService:
             )
 
     # ------------------------------------------------------------------
+    # Decision journal
+    # ------------------------------------------------------------------
+
+    _ACTION_KEYWORDS = {
+        "建议买入": "buy",
+        "买入": "buy",
+        "建议卖出": "sell",
+        "卖出": "sell",
+        "建议持有": "hold",
+        "持有": "hold",
+        "建议减仓": "reduce",
+        "减仓": "reduce",
+        "建议加仓": "add",
+        "加仓": "add",
+    }
+
+    def _record_decision_journal(
+        self,
+        thread_id: str,
+        rich_cards: list[RichCard],
+        final_text: str,
+        tool_records: list[ToolCallRecord],
+    ) -> None:
+        """Record structured decision journal entries for trade signals.
+
+        Detects trade decisions from rich cards or keyword analysis, then
+        persists a causal-chain entry to the ``decision_journal`` table
+        for future outcome tracking and calibration.
+        """
+        entries: list[dict[str, Any]] = []
+
+        # 1. Extract from rich cards (primary path)
+        for card in rich_cards:
+            if card.type in ("trade_decision", "stock_analysis"):
+                props = card.props
+                symbol = props.get("symbol")
+                if not symbol:
+                    continue
+                entries.append(
+                    {
+                        "symbol": symbol,
+                        "action": props.get("action", "hold"),
+                        "confidence": float(props.get("confidence", 0.5)),
+                        "entry_price": (
+                            float(props["entry_price"])
+                            if props.get("entry_price") is not None
+                            else (
+                                float(props["price"])
+                                if props.get("price") is not None
+                                else None
+                            )
+                        ),
+                        "stop_loss": (
+                            float(props["stop_loss"])
+                            if props.get("stop_loss") is not None
+                            else None
+                        ),
+                        "target_price": (
+                            float(props["target_price"])
+                            if props.get("target_price") is not None
+                            else (
+                                float(props["price_target"])
+                                if props.get("price_target") is not None
+                                else None
+                            )
+                        ),
+                        "trigger_event": props.get("trigger", "user_query"),
+                        "key_evidence": {
+                            "bull": props.get("bull_case", props.get("reasoning", "")),
+                            "bear": props.get("bear_case", props.get("risks", "")),
+                        },
+                    }
+                )
+
+        # 2. Fallback: keyword detection when no rich cards matched
+        if not entries:
+            detected_action = None
+            for keyword, action in self._ACTION_KEYWORDS.items():
+                if keyword in final_text:
+                    detected_action = action
+                    break
+            if not detected_action:
+                return  # No trade signal detected
+
+            # Try to extract symbol from text (6-digit patterns)
+            symbol_match = re.search(r"\b(\d{6})\b", final_text)
+            if not symbol_match:
+                return
+            # Extract reasoning context from surrounding text
+            symbol_str = symbol_match.group(1)
+            context_start = max(0, symbol_match.start() - 200)
+            context_end = min(len(final_text), symbol_match.end() + 300)
+            reasoning_snippet = final_text[context_start:context_end].strip()
+
+            entries.append(
+                {
+                    "symbol": symbol_str,
+                    "action": detected_action,
+                    "confidence": 0.5,
+                    "entry_price": None,
+                    "stop_loss": None,
+                    "target_price": None,
+                    "trigger_event": "user_query",
+                    "key_evidence": {
+                        "bull": reasoning_snippet[:200]
+                        if detected_action in ("buy", "add")
+                        else "",
+                        "bear": reasoning_snippet[:200]
+                        if detected_action in ("sell", "reduce")
+                        else "",
+                    },
+                }
+            )
+
+        # 3. Collect shared context
+        data_sources = [r.tool_name for r in tool_records] if tool_records else []
+        sentiment_phase = self._get_current_sentiment_phase()
+        portfolio_ctx = self._get_portfolio_context_snapshot()
+
+        # 4. Persist each entry
+        now = _now_iso()
+        try:
+            with self._connect() as conn:
+                for entry in entries:
+                    journal_id = str(uuid.uuid4())
+                    conn.execute(
+                        """
+                        INSERT INTO decision_journal (
+                            id, timestamp, thread_id, symbol, action,
+                            confidence, trigger_event, data_sources,
+                            key_evidence, sentiment_phase, portfolio_context,
+                            entry_price, stop_loss, target_price
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            journal_id,
+                            now,
+                            thread_id,
+                            entry["symbol"],
+                            entry["action"],
+                            entry["confidence"],
+                            entry.get("trigger_event", "user_query"),
+                            json.dumps(data_sources, ensure_ascii=False),
+                            json.dumps(
+                                entry.get("key_evidence", {}), ensure_ascii=False
+                            ),
+                            sentiment_phase,
+                            json.dumps(portfolio_ctx, ensure_ascii=False)
+                            if portfolio_ctx
+                            else None,
+                            entry.get("entry_price"),
+                            entry.get("stop_loss"),
+                            entry.get("target_price"),
+                        ),
+                    )
+                    logger.info(
+                        "Decision journal entry: %s %s %s (confidence=%.2f, id=%s)",
+                        entry["action"],
+                        entry["symbol"],
+                        thread_id,
+                        entry["confidence"],
+                        journal_id,
+                    )
+        except Exception:
+            logger.warning(
+                "Failed to record decision journal for thread %s",
+                thread_id,
+                exc_info=True,
+            )
+
+    def _get_current_sentiment_phase(self) -> str:
+        """Retrieve current market sentiment phase (best-effort)."""
+        try:
+            from src.agent_loop.sentiment_cycle import SentimentCycleDetector
+
+            detector = SentimentCycleDetector()
+            phase = detector.detect_phase()
+            return phase.value if hasattr(phase, "value") else str(phase)
+        except Exception:
+            return "unknown"
+
+    def _get_portfolio_context_snapshot(self) -> dict[str, Any] | None:
+        """Build a lightweight portfolio snapshot for journal context."""
+        if not self._capital_service:
+            return None
+        try:
+            overview = self._capital_service.get_overview()
+            return {
+                "total_value": overview.get("total_value", 0),
+                "cash": overview.get("cash", 0),
+                "position_count": overview.get("position_count", 0),
+                "sector_weights": overview.get("sector_weights", {}),
+            }
+        except Exception:
+            return None
+
+    def get_decision_stats(self, lookback_days: int = 30) -> dict[str, Any]:
+        """Return aggregate statistics from the decision journal.
+
+        Used for confidence calibration and optimization analysis.
+
+        Args:
+            lookback_days: How many days back to include.
+
+        Returns:
+            Dictionary with total_decisions, pending, wins, losses,
+            win_rate, avg_confidence, avg_return_t1, by_sentiment_phase,
+            and by_action breakdowns.
+        """
+        cutoff = datetime.fromtimestamp(
+            datetime.now(timezone.utc).timestamp() - lookback_days * 86400,
+            tz=timezone.utc,
+        ).isoformat()
+
+        try:
+            with self._connect() as conn:
+                # Overall stats
+                row = conn.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS total,
+                        SUM(CASE WHEN outcome_status = 'pending' THEN 1 ELSE 0 END)
+                            AS pending,
+                        SUM(CASE WHEN outcome_status = 'win' THEN 1 ELSE 0 END)
+                            AS wins,
+                        SUM(CASE WHEN outcome_status = 'loss' THEN 1 ELSE 0 END)
+                            AS losses,
+                        AVG(confidence) AS avg_conf,
+                        AVG(outcome_t1) AS avg_t1
+                    FROM decision_journal
+                    WHERE timestamp >= ?
+                    """,
+                    (cutoff,),
+                ).fetchone()
+
+                total = row[0] or 0
+                pending = row[1] or 0
+                wins = row[2] or 0
+                losses = row[3] or 0
+                avg_conf = round(row[4], 3) if row[4] is not None else None
+                avg_t1 = round(row[5], 4) if row[5] is not None else None
+
+                evaluated = wins + losses
+                win_rate = round(wins / evaluated, 3) if evaluated > 0 else None
+
+                # By sentiment phase
+                phase_rows = conn.execute(
+                    """
+                    SELECT sentiment_phase, COUNT(*) AS cnt,
+                        SUM(CASE WHEN outcome_status = 'win' THEN 1 ELSE 0 END)
+                            AS wins
+                    FROM decision_journal
+                    WHERE timestamp >= ? AND sentiment_phase IS NOT NULL
+                    GROUP BY sentiment_phase
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                by_phase: dict[str, dict] = {}
+                for pr in phase_rows:
+                    phase_name = pr[0] or "unknown"
+                    phase_cnt = pr[1] or 0
+                    phase_wins = pr[2] or 0
+                    by_phase[phase_name] = {
+                        "count": phase_cnt,
+                        "win_rate": round(phase_wins / phase_cnt, 3)
+                        if phase_cnt > 0
+                        else None,
+                    }
+
+                # By action
+                action_rows = conn.execute(
+                    """
+                    SELECT action, COUNT(*) AS cnt,
+                        SUM(CASE WHEN outcome_status = 'win' THEN 1 ELSE 0 END)
+                            AS wins
+                    FROM decision_journal
+                    WHERE timestamp >= ? AND action IS NOT NULL
+                    GROUP BY action
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                by_action: dict[str, dict] = {}
+                for ar in action_rows:
+                    act_name = ar[0] or "unknown"
+                    act_cnt = ar[1] or 0
+                    act_wins = ar[2] or 0
+                    by_action[act_name] = {
+                        "count": act_cnt,
+                        "win_rate": round(act_wins / act_cnt, 3)
+                        if act_cnt > 0
+                        else None,
+                    }
+
+                return {
+                    "total_decisions": total,
+                    "pending": pending,
+                    "wins": wins,
+                    "losses": losses,
+                    "win_rate": win_rate,
+                    "avg_confidence": avg_conf,
+                    "avg_return_t1": avg_t1,
+                    "by_sentiment_phase": by_phase,
+                    "by_action": by_action,
+                }
+        except Exception:
+            logger.warning("Failed to compute decision stats", exc_info=True)
+            return {
+                "total_decisions": 0,
+                "pending": 0,
+                "wins": 0,
+                "losses": 0,
+                "win_rate": None,
+                "avg_confidence": None,
+                "avg_return_t1": None,
+                "by_sentiment_phase": {},
+                "by_action": {},
+            }
+
+    # ------------------------------------------------------------------
     # Timeout summarization
     # ------------------------------------------------------------------
 
@@ -729,7 +1162,7 @@ class AgentService:
                 messages=summary_messages,
                 tools=[],  # No tools — force text-only reply
                 caller="agent_service.summarize_timeout",
-                max_tokens=1024,
+                max_tokens=4096,
                 temperature=0.3,
                 analysis_type="agent_chat",
             )
@@ -751,10 +1184,13 @@ class AgentService:
         persona_config: dict | None = None,
     ) -> str:
         """Build the master agent system prompt with context injection."""
-        # Base role description
+        # Base role description — AI PM mandate (v50.0)
         base_role = (
-            "你是一个专业的 A 股投资分析 Agent。用户会向你提问关于股票投资的各种问题，"
-            "你需要利用提供的工具获取实时数据并进行分析，给出专业、可操作的建议。"
+            "You are an AI portfolio manager. The user is an execution trader. "
+            "You make decisions, the user executes. You manage a real A-share portfolio "
+            "and are responsible for investment outcomes. Use the provided tools to fetch "
+            "real-time data, analyze, and issue professional, actionable trade instructions. "
+            "All output must be in Chinese."
         )
 
         # Inject persona overlay if present
@@ -762,101 +1198,341 @@ class AgentService:
         if persona_config:
             overlay = persona_config.get("system_prompt_overlay", "")
 
+        from datetime import datetime as _dt, timedelta
+        from zoneinfo import ZoneInfo
+
+        _cst = ZoneInfo("Asia/Shanghai")
+        _now_cst = _dt.now(_cst)
+        _today_str = _now_cst.strftime("%Y-%m-%d %H:%M CST (北京时间)")
+        _weekday_cn = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
+            _now_cst.weekday()
+        ]
+
+        # Determine last trading day (skip weekends)
+        _check = _now_cst.date()
+        if _now_cst.hour < 15:
+            # Before market close — last trading day is previous business day
+            _check -= timedelta(days=1)
+        while _check.weekday() >= 5:  # Saturday=5, Sunday=6
+            _check -= timedelta(days=1)
+        _last_trading_day = _check.isoformat()
+
+        # Classify request type for prompt tiering
+        request_type = self._classify_request(user_message)
+
         parts = [base_role]
         if overlay:
             parts.append(overlay)
+
+        # --- Universal sections (all request types) ---
         parts.extend(
             [
                 "",
-                "## 数据准确性铁律（最高优先级）",
-                "- **禁止编造任何数字**：价格、涨跌幅、成交量、资金流、目标价、止损价等所有数值"
-                "必须来自工具返回的实时数据。绝不可凭记忆或推测给出具体数字。",
-                "- **必须先调用工具获取数据，再引用数据**：没有调用 get_realtime_quote 之前，"
-                "不得在回复中提及任何具体股价或涨跌幅。",
-                "- **止损价必须低于当前价格**：如果做多建议止损价 ≥ 当前价，说明分析有误，必须修正。",
-                "- **目标价必须合理**：目标价不得偏离当前价超过 ±30%（主板）或 ±40%（创业板/科创板）。",
-                "- **涨跌幅描述必须与数据一致**：不得将正涨幅描述为下跌，或将小幅波动描述为涨停/跌停。",
-                "- 如果某项数据不可用，明确告知用户'该数据暂不可用'，不得编造替代数据。",
+                f"## Current time: {_today_str} ({_weekday_cn})",
+                f"## Last trading day: {_last_trading_day}",
+                "Quote data is from the last trading day's close. When describing data, "
+                "say '上一交易日' or the specific date — never say '昨日' (may be inaccurate "
+                "due to weekends/holidays). Output in Chinese.",
+            ]
+        )
+
+        # --- Sentiment cycle injection (all types except general) ---
+        if request_type != "general":
+            sentiment_hint = self._build_sentiment_cycle_hints()
+            if sentiment_hint:
+                parts.append("")
+                parts.append(sentiment_hint)
+
+        # --- Data staleness warning (all types except general) ---
+        if request_type != "general":
+            parts.extend(
+                [
+                    "",
+                    "Your training data cutoff is before today. Any information about company "
+                    "news, earnings, or announcements may be outdated. You MUST use tools to "
+                    "fetch current data — never rely on your memory.",
+                ]
+            )
+
+        # --- Data accuracy rules (stock_analysis + trade_decision) ---
+        if request_type in ("stock_analysis", "trade_decision"):
+            parts.extend(
+                [
+                    "",
+                    "## Data Accuracy Iron Rules (highest priority)",
+                    "- **Never fabricate any numbers**: prices, change%, volume, capital flow, "
+                    "target price, stop-loss — all values must come from tool-returned real-time data. "
+                    "Never give specific numbers from memory or speculation.",
+                    "- **Call tools first, then reference data**: before calling get_realtime_quote, "
+                    "you must NOT mention any specific stock price or change% in your reply. "
+                    "**Key: do not write any analysis outside tool_call tags. Output all tool_calls first, "
+                    "then write analysis after receiving tool_results.**",
+                    "- **Stop-loss must be below current price**: if a long recommendation has "
+                    "stop-loss >= current price, the analysis is wrong — fix it.",
+                    "- **Target price must be reasonable**: must not deviate from current price "
+                    "by more than ±30% (main board) or ±40% (ChiNext/STAR).",
+                    "- **Change% description must match data**: never describe positive gains as "
+                    "drops, or small fluctuations as limit-up/limit-down.",
+                    "- If data is unavailable, clearly tell the user '该数据暂不可用' — never fabricate.",
+                ]
+            )
+
+        # --- Reply conventions (all types) ---
+        parts.extend(
+            [
                 "",
-                "## 回复规范",
-                "- 使用中文回复",
-                "- 结论先行，再给理由",
-                "- 每个操作建议必须附带风险提示",
-                "- 当给出买入建议时，必须同时给出建议止损位（用'如果跌到 XX 元建议卖出'表述）",
-                "- 不使用专业量化术语（如 RSI/MACD/Sharpe），用通俗易懂的表达替代",
-                "- 永远不说'一定涨'或'一定赚'",
+                "## Reply Conventions",
+                "- Reply in Chinese",
+                "- Lead with conclusion, then give reasoning",
+                "- Every action recommendation must include a risk warning",
+                "- Do not use quant jargon (RSI/MACD/Sharpe) — use plain language alternatives",
+                "- Never say '一定涨' or '一定赚' (guaranteed gain)",
+            ]
+        )
+        if request_type in ("stock_analysis", "trade_decision"):
+            parts.append(
+                "- When recommending a buy, always include a stop-loss level "
+                "(express as '如果跌到 XX 元建议卖出')"
+            )
+
+        # --- Tool usage instructions (tiered by request type) ---
+        if request_type == "stock_analysis":
+            parts.extend(
+                [
+                    "",
+                    "## Tool Usage (strictly enforce, do not skip)",
+                    "",
+                    "**Preferred tool for stock analysis is deep_analyze.**",
+                    "",
+                    "⚠️ **First reply: output tool_call tags ONLY — no analysis text.** "
+                    "Write analysis only after tool_results come back.",
+                    "",
+                    "**Primary path (recommended):**",
+                    "Step 1: Call deep_analyze(symbol=...) — single call that returns a full "
+                    "15+ dimension snapshot (quotes, capital flow, intel, quant signals, "
+                    "VWAP/VPIN, multi-timeframe, reflexivity, sentiment cycle, portfolio, "
+                    "risk, macro, geopolitical, thesis) plus a structured investment decision. "
+                    "The returned snapshot_text contains all data you need.",
+                    "Step 2: Write analysis based on the complete data from deep_analyze. "
+                    "If you need the latest breaking news, supplement with search_intel or web_search.",
+                    "",
+                    "**Fallback path (only when deep_analyze is unavailable):**",
+                    "Step 1: Call get_realtime_quote for real-time quotes",
+                    "Step 2: Call search_intel(symbol=...) for local intelligence",
+                    "Step 3: Call get_fund_flow for capital flow data",
+                    "Step 4: Analyze based on **real data** from tool results",
+                    "",
+                    "⚠️ **Never write news-based analysis without first calling "
+                    "search_intel and/or web_search.** "
+                    "Your training data news is outdated — you must use tools for current info.",
+                    "",
+                    "- Do not retry search_intel more than 2 times if empty. "
+                    "web_search is only for searching latest news, announcements, reports — "
+                    "NOT for market data. "
+                    "⚠️ Never use web_search for stock prices, volume, change%, capital flow "
+                    "— market data must come from deep_analyze/get_realtime_quote system tools.",
+                ]
+            )
+        elif request_type == "trade_decision":
+            parts.extend(
+                [
+                    "",
+                    "## Tool Usage",
+                    "- **Preferred**: Call deep_analyze(symbol=...) for full snapshot + "
+                    "structured decision (includes portfolio, risk gates, Bayesian posterior, "
+                    "convergence score, and all context needed for a trade decision)",
+                    "- If you need to verify holding details: call get_portfolio",
+                    "- If you need breaking news: call search_intel",
+                    "⚠️ **First reply: output tool_calls only, no analysis.** "
+                    "Write analysis after tool_results.",
+                    "",
+                    "## Debate Trigger Rule",
+                    "When your confidence is between 0.4-0.7, "
+                    "you MUST call run_debate tool for bull/bear debate.",
+                ]
+            )
+        elif request_type == "portfolio_review":
+            parts.extend(
+                [
+                    "",
+                    "## Tool Usage — 深度持仓分析",
+                    "你必须对每个持仓做完整深度分析，不能只列数字：",
+                    "",
+                    "Step 1: 调用 get_portfolio 获取持仓列表",
+                    "Step 2: 对每个持仓股调用 deep_analyze(symbol=...) 获取15+维度快照",
+                    "  包括: 实时行情、资金流向、情报、量化信号、VWAP/VPIN、",
+                    "  多时间框架、反身性、情绪周期、风险、宏观、论点状态",
+                    "Step 3: 调用 get_intraday_fund_flow_timeline 查看每只股今日资金流向趋势",
+                    "Step 4: 调用 get_active_theses 查看持仓论点是否仍然有效",
+                    "",
+                    "对每个持仓给出：",
+                    "- 当前状况（价格、盈亏、今日表现）",
+                    "- 资金面判断（主力在买还是在卖）",
+                    "- 论点是否仍有效",
+                    "- 操作建议：继续持有(理由+止损位) / 减仓(理由+手数) / 清仓(理由)",
+                    "",
+                    "最后给出整体组合评估：集中度、行业暴露、总风险",
+                    "",
+                    "⚠️ **First reply: output tool_calls only, no analysis.** "
+                    "Write analysis after tool_results.",
+                    "",
+                    "## Debate Trigger Rule",
+                    "When your confidence is between 0.4-0.7, "
+                    "you MUST call run_debate tool for bull/bear debate.",
+                ]
+            )
+        elif request_type == "market_overview":
+            parts.extend(
+                [
+                    "",
+                    "## Tool Usage",
+                    "- Call get_market_overview for broad market data",
+                    "- If needed, call get_global_markets for global markets",
+                    "⚠️ **First reply: output tool_calls only, no analysis.** "
+                    "Write analysis after tool_results.",
+                ]
+            )
+
+        # --- Rich Card output (all types except general) ---
+        if request_type != "general":
+            parts.extend(
+                [
+                    "",
+                    "## Rich Card Output",
+                    "When analysis results suit structured display, append JSON tag at end of reply:",
+                    '<!--RICH_CARDS:[{"type": "stock_analysis", "props": {...}}]-->',
+                    "",
+                    "Supported card types:",
+                ]
+            )
+            if request_type in ("stock_analysis",):
+                parts.extend(
+                    [
+                        "- stock_analysis: 个股分析结果",
+                        "  props: title(可选,如'贵州茅台分析'), symbol, "
+                        "signal(bullish/bearish/neutral), "
+                        "confidence(0~1), summary(支持 Markdown，"
+                        "完整分析内容写在这里), "
+                        "dimensions(数组,每项含 key/label/signal/score/reasoning), "
+                        "risk_warnings(字符串数组)",
+                    ]
+                )
+            if request_type in ("stock_analysis", "trade_decision"):
+                parts.append(
+                    "- trade_decision: 交易建议（含 action, shares, price, "
+                    "reasoning, risks, confidence, key_metrics, dimensions）"
+                )
+            if request_type in ("market_overview", "stock_analysis"):
+                parts.extend(
+                    [
+                        "- market_overview: 市场概览",
+                        "  props: title(如'市场简报'), "
+                        "signal(bullish/bearish/neutral), "
+                        "confidence(0~1), summary(支持 Markdown，"
+                        "将完整市场分析写在 summary 中，"
+                        "可以使用标题/列表/加粗等格式), "
+                        "dimensions(可选), risk_warnings(可选)",
+                    ]
+                )
+            if request_type in ("portfolio_review", "stock_analysis"):
+                parts.extend(
+                    [
+                        "- portfolio_summary: 持仓概览",
+                        "  props: title(如'持仓诊断'), signal, confidence, "
+                        "summary(支持 Markdown), "
+                        "dimensions(可选), risk_warnings(可选)",
+                    ]
+                )
+            parts.extend(
+                [
+                    "",
+                    "**Important**: stock_analysis/market_overview/portfolio_summary "
+                    "summary fields support full Markdown. "
+                    "Write all detailed analysis in summary — don't truncate. "
+                    "Use ## headings, - lists, **bold** formatting.",
+                ]
+            )
+
+        # --- Trade decision output spec (stock_analysis + trade_decision) ---
+        if request_type in ("stock_analysis", "trade_decision"):
+            parts.extend(
+                [
+                    "",
+                    "## Trade Decision Output Spec",
+                    "When recommending buy/sell on a specific stock, "
+                    "you **must** output a trade_decision Rich Card:",
+                    "- Must first call get_realtime_quote for latest price — "
+                    "price field **must use tool-returned real-time price**, never fabricate",
+                    "- shares must be a multiple of 100",
+                    "- **On buy**: shares × price **must not exceed** user's available capital "
+                    "(see user capital config). "
+                    "If capital is insufficient for 100 shares, don't output trade_decision — "
+                    "explain insufficient funds in text",
+                    "- **On sell**: must first call get_portfolio to confirm holdings — "
+                    "shares **must not exceed** user's actual holding quantity. "
+                    "If not held, don't recommend selling",
+                    "- Must include stop_loss (must be < price, i.e. below current price)",
+                    "- Must include risks (at least 1 risk warning)",
+                    "- Must include reasoning (trade rationale)",
+                    "- Must include confidence (float 0-1)",
+                    "- Recommended: key_metrics array, each with label, value, "
+                    "signal(bullish/bearish/neutral)",
+                    "- Recommended: dimensions array, each with label (e.g. '技术面'), "
+                    "signal(bullish/bearish/neutral), score(0-1)",
+                    "",
+                    "## Consistency Rule (CRITICAL)",
+                    "- If your analysis concludes HOLD or WATCH, do **NOT** output a "
+                    "trade_decision card — only describe your view in text",
+                    "- If you output both stock_analysis and trade_decision cards for the "
+                    "same stock, the trade_decision action **MUST** be consistent with "
+                    "the stock_analysis recommendation. Never recommend SELL in "
+                    "trade_decision when your analysis says HOLD/BUY, or vice versa",
+                    "- Only output trade_decision for actionable signals: BUY, ADD, "
+                    "REDUCE, or SELL — never for HOLD or WATCH",
+                    "",
+                    "示例：",
+                    '<!--RICH_CARDS:[{"type":"trade_decision",'
+                    '"props":{"symbol":"600519",'
+                    '"stock_name":"贵州茅台","action":"buy",'
+                    '"shares":100,"price":1680.5,'
+                    '"reasoning":"...","stop_loss":1600,"risks":["..."],'
+                    '"confidence":0.72,'
+                    '"key_metrics":[{"label":"5日涨幅",'
+                    '"value":"+3.2%","signal":"bullish"},'
+                    '{"label":"主力资金",'
+                    '"value":"净流入1.2亿","signal":"bullish"}],'
+                    '"dimensions":[{"label":"技术面",'
+                    '"signal":"bullish","score":0.75},'
+                    '{"label":"资金面",'
+                    '"signal":"bullish","score":0.68},'
+                    '{"label":"消息面",'
+                    '"signal":"neutral","score":0.5}]}}]-->',
+                ]
+            )
+
+        # --- Position management rules (stock_analysis + trade_decision) ---
+        if request_type in ("stock_analysis", "trade_decision"):
+            parts.extend(
+                [
+                    "",
+                    "## Position Management Rules",
+                    "- Single stock position should not exceed 20% of total capital",
+                    "- risk_level=high: watch only or minimal position (<=5%)",
+                    "- risk_level=medium: cautious entry (<=10%)",
+                    "- risk_level=low: normal entry (<=15%)",
+                    "- First entry: recommend scaling in (1/3 first, add after trend confirmation)",
+                    "- Adding to profitable positions: max 50% of initial position size",
+                ]
+            )
+
+        # --- Disclaimer (all types) ---
+        parts.extend(
+            [
                 "",
-                "## 工具使用",
-                "- 你可以调用提供的工具来获取实时数据",
-                "- 先获取数据，再基于数据分析，最后给出结论",
-                "- 如果用户问的是具体个股，先获取实时行情和技术指标",
-                "- 如果涉及概念板块，获取相关概念数据",
-                "- 如果涉及全球市场影响，获取全球市场数据",
-                "- **情报查询（必须执行）**: 分析个股时，**必须**先调用 "
-                "`search_intel(symbol=...)` 获取该股票的本地情报。"
-                "如果本地情报不足（返回空或少于 2 条），再调用 `web_search` "
-                "联网搜索该股票最新新闻和消息，补充分析所需的消息面信息。",
-                "- search_intel 返回空不要反复重试超过 2 次。"
-                "web_search 用于联网搜索最新新闻、公告、研报等，补充本地情报不足。",
-                "",
-                "## Rich Card 输出",
-                "当分析结果适合结构化展示时，在回复末尾附加 JSON 标记：",
-                '<!--RICH_CARDS:[{"type": "stock_analysis", "props": {...}}]-->',
-                "",
-                "支持的 card 类型：",
-                "- stock_analysis: 个股分析结果",
-                "  props: title(可选,如'贵州茅台分析'), symbol, signal(bullish/bearish/neutral), "
-                "confidence(0~1), summary(支持 Markdown，完整分析内容写在这里), "
-                "dimensions(数组,每项含 key/label/signal/score/reasoning), risk_warnings(字符串数组)",
-                "- trade_decision: 交易建议（含 action, shares, price, reasoning, risks, confidence, key_metrics, dimensions）",
-                "- market_overview: 市场概览",
-                "  props: title(如'市场简报'), signal(bullish/bearish/neutral), "
-                "confidence(0~1), summary(支持 Markdown，将完整市场分析写在 summary 中，"
-                "可以使用标题/列表/加粗等格式), dimensions(可选), risk_warnings(可选)",
-                "- portfolio_summary: 持仓概览",
-                "  props: title(如'持仓诊断'), signal, confidence, summary(支持 Markdown), "
-                "dimensions(可选), risk_warnings(可选)",
-                "",
-                "**重要**: stock_analysis/market_overview/portfolio_summary 的 summary 字段支持完整 Markdown，"
-                "请将详细分析内容全部写入 summary，不要截断。可以使用 ## 标题、- 列表、**加粗** 等格式。",
-                "",
-                "## 交易建议输出规范",
-                "当你建议买入或卖出具体个股时，**必须**输出 trade_decision 类型的 Rich Card：",
-                "- 必须先用 get_realtime_quote 获取最新价格，price 字段**必须使用工具返回的实时价格**，不得编造",
-                "- shares 必须是 100 的整数倍",
-                "- **买入时**: shares × price **不得超过**用户可用资金（见用户资金配置）。"
-                "如果资金不足以买入 100 股，不要输出 trade_decision，在文字中说明资金不足",
-                "- **卖出时**: 必须先调用 get_portfolio 确认用户持仓，"
-                "shares **不得超过**用户实际持有股数。如未持有则不建议卖出",
-                "- 必须包含 stop_loss（止损价，必须 < price，即低于当前价格）",
-                "- 必须包含 risks（至少 1 条风险提示）",
-                "- 必须包含 reasoning（交易理由）",
-                "- 必须包含 confidence（置信度，0~1 之间的浮点数）",
-                "- 建议包含 key_metrics（关键量化指标数组），每项含 label(指标名)、value(值)、signal(bullish/bearish/neutral)",
-                "- 建议包含 dimensions（分析维度数组），每项含 label(维度名如'技术面')、signal(bullish/bearish/neutral)、score(0~1)",
-                "",
-                "示例：",
-                '<!--RICH_CARDS:[{"type":"trade_decision","props":{"symbol":"600519",'
-                '"stock_name":"贵州茅台","action":"buy","shares":100,"price":1680.5,'
-                '"reasoning":"...","stop_loss":1600,"risks":["..."],'
-                '"confidence":0.72,'
-                '"key_metrics":[{"label":"5日涨幅","value":"+3.2%","signal":"bullish"},'
-                '{"label":"主力资金","value":"净流入1.2亿","signal":"bullish"}],'
-                '"dimensions":[{"label":"技术面","signal":"bullish","score":0.75},'
-                '{"label":"资金面","signal":"bullish","score":0.68},'
-                '{"label":"消息面","signal":"neutral","score":0.5}]}}]-->',
-                "",
-                "## 仓位管理规则",
-                "- 单只股票建议仓位不超过总资金的 20%",
-                "- risk_level=high: 仅观望或极小仓位(<=5%)",
-                "- risk_level=medium: 谨慎建仓(<=10%)",
-                "- risk_level=low: 正常建仓(<=15%)",
-                "- 首次建仓建议分批（先 1/3，确认趋势再加仓）",
-                "- 已盈利持仓的加仓不超过初始仓位的 50%",
-                "",
-                "## 免责声明",
-                "⚠ 以上分析仅供研究学习参考，不构成任何投资建议。"
-                "股市有风险，投资需谨慎。请根据自身风险承受能力做出独立判断。",
+                "## Disclaimer",
+                "⚠ The above analysis is for research and learning purposes only — "
+                "it does not constitute investment advice. Stock markets carry risk. "
+                "Make independent decisions based on your own risk tolerance.",
             ]
         )
 
@@ -864,14 +1540,14 @@ class AgentService:
         market_hints = self._build_market_session_hints()
         if market_hints:
             parts.append("")
-            parts.append("## 当前市场状态")
+            parts.append("## Current Market Status")
             parts.append(market_hints)
 
         # Inject user capital and risk preference
         capital_hints = self._build_capital_hints()
         if capital_hints:
             parts.append("")
-            parts.append("## 用户资金配置")
+            parts.append("## User Capital Configuration")
             parts.append(capital_hints)
 
         # Inject context-specific hints from ThreadContext
@@ -880,14 +1556,14 @@ class AgentService:
             context_hints = self._build_context_hints(context)
             if context_hints:
                 parts.append("")
-                parts.append("## 当前上下文")
+                parts.append("## Current Context")
                 parts.append(context_hints)
 
         # Inject selected intel items
         intel_hints = self._build_intel_hints(thread_id)
         if intel_hints:
             parts.append("")
-            parts.append("## 用户选择的情报")
+            parts.append("## User-Selected Intelligence")
             parts.append(intel_hints)
 
         # Auto-inject stock-related intel from intelligence hub
@@ -896,31 +1572,138 @@ class AgentService:
         )
         if stock_intel:
             parts.append("")
-            parts.append("## 相关个股情报（自动检索）")
+            parts.append("## Related Stock Intelligence (auto-retrieved)")
             parts.append(stock_intel)
 
         # Inject user trading behavior personality (v12.0 Phase 4)
         personality_hints = self._build_personality_hints()
         if personality_hints:
             parts.append("")
-            parts.append("## 用户交易行为画像")
+            parts.append("## User Trading Behavior Profile")
             parts.append(personality_hints)
 
         # Inject historical accuracy from model monitor (v18.0)
         accuracy_hints = self._build_accuracy_hints()
         if accuracy_hints:
             parts.append("")
-            parts.append("## 历史预测准确率")
+            parts.append("## Historical Prediction Accuracy")
             parts.append(accuracy_hints)
 
         # Inject relevant memories (v18.0)
         memory_hints = self._build_memory_hints(thread_id)
         if memory_hints:
             parts.append("")
-            parts.append("## 相关经验")
+            parts.append("## Related Experience")
             parts.append(memory_hints)
 
+        # Inject portfolio context + sentiment phase (v50.0 AI PM mandate)
+        portfolio_ctx = self._build_portfolio_context_hints()
+        if portfolio_ctx:
+            parts.append("")
+            parts.append("## Current Portfolio Status")
+            parts.append(portfolio_ctx)
+
+        # Inject real-time stock data for mentioned symbols (prevent hallucination)
+        stock_data = self._build_realtime_stock_data(user_message)
+        if stock_data:
+            parts.append("")
+            parts.append(
+                "## Real-Time Market Data (auto-retrieved, use ONLY these numbers)"
+            )
+            parts.append(stock_data)
+
         return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Request classification for prompt tiering
+    # ------------------------------------------------------------------
+
+    _RE_STOCK_ANALYSIS = re.compile(r"\d{6}|[A-Za-z]+股|分析|研究")
+    _RE_TRADE_DECISION = re.compile(r"该不该买|要不要卖|建议|操作|加仓|减仓|止损")
+    _RE_PORTFOLIO_REVIEW = re.compile(r"持仓|仓位|账户|资金|盈亏")
+    _RE_MARKET_OVERVIEW = re.compile(r"大盘|市场|行情|今天|指数")
+
+    @staticmethod
+    def _classify_request(user_message: str) -> str:
+        """Classify user message into a request type for prompt tiering.
+
+        Returns one of: stock_analysis, trade_decision, portfolio_review,
+        market_overview, general.
+
+        Priority order matters — a message mentioning both a stock code and
+        "该不该买" is classified as trade_decision (actionable trumps
+        analytical).
+        """
+        if not user_message:
+            return "general"
+        msg = user_message.strip()
+        # trade_decision checked first — actionable intent takes priority
+        if AgentService._RE_TRADE_DECISION.search(msg):
+            return "trade_decision"
+        if AgentService._RE_STOCK_ANALYSIS.search(msg):
+            return "stock_analysis"
+        if AgentService._RE_PORTFOLIO_REVIEW.search(msg):
+            return "portfolio_review"
+        if AgentService._RE_MARKET_OVERVIEW.search(msg):
+            return "market_overview"
+        return "general"
+
+    # ------------------------------------------------------------------
+    # Sentiment cycle context
+    # ------------------------------------------------------------------
+
+    _SENTIMENT_GUIDANCE: dict[str, str] = {
+        "freezing": ("极度谨慎，以观望为主。只在极端低估时小仓位试探，保持80%现金"),
+        "ignition": ("开始关注，寻找先导板块的龙头。可小仓位参与确定性强的机会"),
+        "acceleration": ("积极参与，跟随主流方向。重点关注量价配合、板块轮动的龙头"),
+        "climax": ("注意风险，开始减仓。赚钱效应达到顶峰，但也是最危险的时候"),
+        "ebb": ("全面防守，清仓为主。亏钱效应扩散，等待下一个冰点"),
+    }
+
+    def _build_sentiment_cycle_hints(self) -> str:
+        """Build sentiment cycle context for the system prompt.
+
+        Tries three sources in order:
+        1. PortfolioStore latest snapshot (cached by trading loop)
+        2. Direct SentimentCycleDetector with fresh signals
+        3. Falls back to "未知" if unavailable
+        """
+        phase_en: str | None = None
+        phase_cn: str | None = None
+        confidence: float | None = None
+
+        # Source 1: portfolio snapshot (most common path — cached data)
+        try:
+            from src.web.services.portfolio_store import PortfolioStore
+
+            store = PortfolioStore()
+            latest = store.get_latest_snapshot()
+            if latest and latest.get("sentiment_phase"):
+                phase_en = latest["sentiment_phase"]
+                phase_cn = latest.get("sentiment_phase_cn")
+                confidence = latest.get("sentiment_confidence")
+        except Exception:
+            pass
+
+        # If we have a phase, build the hint
+        if phase_en:
+            if not phase_cn:
+                from src.agent_loop.sentiment_cycle import _PHASE_CN
+
+                phase_cn = _PHASE_CN.get(phase_en, phase_en)
+            conf_str = f"{confidence:.0%}" if confidence is not None else "未知"
+            guidance = self._SENTIMENT_GUIDANCE.get(phase_en, "")
+            lines = [
+                "## 当前市场情绪周期",
+                f"- 阶段：{phase_cn}（{phase_en}）",
+                f"- 置信度：{conf_str}",
+            ]
+            if guidance:
+                lines.append(f"- 操作指导：{guidance}")
+            return "\n".join(lines)
+
+        # No data available
+        return ""
 
     @staticmethod
     def _build_market_session_hints() -> str:
@@ -1166,6 +1949,192 @@ class AgentService:
         except Exception:
             return ""
 
+    def _build_portfolio_context_hints(self) -> str:
+        """Build portfolio + sentiment context for AI PM system prompt.
+
+        Uses PortfolioStore (ground truth) + RealtimeQuoteManager for live prices.
+        """
+        lines: list[str] = []
+
+        # Portfolio from PortfolioStore (ground truth, same as InvestorAgent)
+        try:
+            from src.web.dependencies import (
+                get_portfolio_store,
+                get_realtime_quote_manager,
+            )
+
+            ps = get_portfolio_store()
+            positions = ps.list_positions()
+            holdings = [p for p in positions if int(p.get("shares", 0)) > 0]
+
+            if holdings:
+                # Get live quotes
+                symbols = [p["symbol"] for p in holdings if p.get("symbol")]
+                live_quotes = {}
+                try:
+                    rqm = get_realtime_quote_manager()
+                    if rqm and symbols:
+                        df = rqm.get_quotes(symbols)
+                        if hasattr(df, "iterrows"):
+                            for _, row in df.iterrows():
+                                live_quotes[str(row.get("symbol", ""))] = {
+                                    "price": row.get("price"),
+                                    "pct_change": row.get("pct_change"),
+                                }
+                except Exception:
+                    pass
+
+                lines.append(f"持仓 {len(holdings)} 只：")
+                for p in holdings:
+                    sym = p.get("symbol", "?")
+                    name = p.get("name", sym)
+                    shares = int(p.get("shares", 0))
+                    cost = float(p.get("cost_price", 0))
+                    today_bought = int(p.get("today_bought", 0))
+                    available = shares - today_bought
+
+                    q = live_quotes.get(sym, {})
+                    price = q.get("price")
+                    pct = q.get("pct_change")
+
+                    line = f"  - {name}({sym}): {shares}股, 成本{cost:.3f}元"
+                    if price:
+                        pnl_pct = (float(price) - cost) / cost * 100 if cost > 0 else 0
+                        pnl_val = (float(price) - cost) * shares
+                        line += (
+                            f", 现价{price}元, 浮盈亏{pnl_val:+,.0f}元({pnl_pct:+.1f}%)"
+                        )
+                    if pct is not None:
+                        line += f", 今日{float(pct):+.2f}%"
+                    line += f", 可卖{available}股"
+                    if today_bought > 0:
+                        line += f" (今买{today_bought}股T+1)"
+                    lines.append(line)
+            else:
+                lines.append("当前空仓。")
+        except Exception:
+            # Fallback to trade_service if PortfolioStore unavailable
+            if self._trade_service:
+                try:
+                    positions = self._trade_service.get_positions()
+                    if positions:
+                        lines.append(f"持仓 {len(positions)} 只：")
+                        for p in positions[:8]:
+                            sym = p.get("symbol", "?")
+                            name = p.get("name", "?")
+                            pnl = p.get("pnl_pct", 0)
+                            val = p.get("market_value", 0)
+                            lines.append(
+                                f"  - {name}({sym}) 市值¥{val:,.0f} 盈亏{pnl:+.1%}"
+                            )
+                    else:
+                        lines.append("当前空仓。")
+                except Exception:
+                    pass
+
+        # Cash + regime from capital service
+        if self._capital_service:
+            try:
+                bd = self._capital_service.get_breakdown()
+                if bd.has_initial_deposit:
+                    lines.append(f"可用现金: ¥{bd.available_cash:,.2f}")
+                    lines.append(f"总资产: ¥{bd.total_assets:,.2f}")
+            except Exception:
+                pass
+
+        # Sentiment phase if available via trading loop state
+        try:
+            from src.web.services.portfolio_store import PortfolioStore
+
+            store = PortfolioStore()
+            latest = store.get_latest_snapshot()
+            if latest and latest.get("sentiment_phase"):
+                phase = latest["sentiment_phase"]
+                lines.append(f"情绪周期: {phase}")
+        except Exception:
+            pass
+
+        return "\n".join(lines)
+
+    def _build_realtime_stock_data(self, user_message: str) -> str:
+        """Inject real-time stock data for symbols mentioned in user message.
+
+        Prevents LLM hallucination by providing ground-truth market data
+        directly in the prompt. The LLM should use ONLY these numbers.
+        """
+        # Extract 6-digit stock codes from user message
+        import re as _re
+
+        codes = _re.findall(r"\b[036]\d{5}\b", user_message)
+
+        # Also include portfolio holdings
+        try:
+            from src.web.dependencies import get_portfolio_store
+
+            ps = get_portfolio_store()
+            for p in ps.list_positions():
+                if int(p.get("shares", 0)) > 0:
+                    sym = p.get("symbol", "")
+                    if sym and sym not in codes:
+                        codes.append(sym)
+        except Exception:
+            pass
+
+        if not codes:
+            return ""
+
+        lines: list[str] = []
+        try:
+            from src.web.dependencies import get_realtime_quote_manager
+
+            rqm = get_realtime_quote_manager()
+            if not rqm:
+                return ""
+
+            df = rqm.get_quotes(codes[:5])
+            if not hasattr(df, "iterrows") or df.empty:
+                return ""
+
+            for _, row in df.iterrows():
+                sym = str(row.get("symbol", ""))
+                name = str(row.get("name", sym))
+                price = row.get("price")
+                pct = row.get("pct_change")
+                vol = row.get("volume")
+                amt = row.get("amount")
+                high = row.get("high")
+                low = row.get("low")
+                prev = row.get("prev_close")
+
+                lines.append(f"### {name}({sym})")
+                if price:
+                    lines.append(f"- 最新价: {price}元")
+                if pct is not None:
+                    lines.append(f"- 涨跌幅: {float(pct):+.2f}%")
+                if prev:
+                    lines.append(f"- 昨收: {prev}元")
+                if high and low:
+                    lines.append(f"- 今日区间: {low}-{high}元")
+                if vol:
+                    vol_wan = float(vol) / 10000
+                    lines.append(f"- 成交量: {vol_wan:,.0f}万股")
+                if amt:
+                    amt_yi = float(amt) / 100000000
+                    lines.append(f"- 成交额: {amt_yi:.2f}亿元")
+                lines.append("")
+
+            if lines:
+                lines.insert(
+                    0,
+                    "以下数据来自实时行情系统，是准确的。"
+                    "请严格使用这些数据，不要使用任何其他来源的数字。\n",
+                )
+
+        except Exception:
+            pass
+
+        return "\n".join(lines)
+
     def _build_intel_hints(self, thread_id: str) -> str:
         """Build intel context from selected intelligence items."""
         if not self._intel_hub:
@@ -1328,7 +2297,7 @@ class AgentService:
         lines.insert(0, header)
         lines.append("")
         lines.append(
-            "如果以上情报不足以支撑消息面分析，请调用 web_search 联网搜索补充。"
+            "如果以上情报不足以支撑消息面分析，请调用 web_search 联网搜索补充（仅限新闻/公告，严禁搜索行情价格）。"
         )
         return "\n".join(lines)
 
@@ -1344,7 +2313,7 @@ class AgentService:
                 f"get_technical_indicators 工具分析该股票，"
                 f"然后结合概念板块和资金面给出综合判断。"
                 f"\n**必须**调用 search_intel(symbol='{symbol}') 获取相关情报，"
-                f"如果情报不足再调用 web_search 联网搜索 {symbol} 最新消息。"
+                f"如果情报不足再调用 web_search 联网搜索 {symbol} 最新新闻（严禁搜索行情价格）。"
             )
         if mode == "portfolio":
             return (
@@ -1360,6 +2329,226 @@ class AgentService:
         return ""
 
     # ------------------------------------------------------------------
+    # Text-based tool_use helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_tool_instruction(tool_definitions: list[dict[str, Any]]) -> str:
+        """Build a text-based tool instruction block for the system prompt."""
+        lines = [
+            "## Available Tools",
+            "",
+            "You have access to the following tools. To call a tool, output a "
+            "JSON block wrapped in <tool_call> tags:",
+            "",
+            "```",
+            '<tool_call>{"name": "tool_name", "input": {"param": "value"}}</tool_call>',
+            "```",
+            "",
+            "You may call multiple DIFFERENT tools in a single response. "
+            "NEVER repeat the same tool call — each tool_call must be unique. "
+            "After all tool results are returned, provide your final answer "
+            "WITHOUT any tool_call tags.",
+            "",
+            "### Tool Definitions",
+            "",
+        ]
+        for tool in tool_definitions:
+            name = tool.get("name", "unknown")
+            desc = tool.get("description", "")
+            schema = tool.get("input_schema", {})
+            lines.append(f"**{name}**: {desc}")
+            if schema.get("properties"):
+                params = ", ".join(
+                    f"`{k}` ({v.get('type', 'any')})"
+                    for k, v in schema["properties"].items()
+                )
+                lines.append(f"  Parameters: {params}")
+            lines.append("")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _parse_tool_calls_from_text(text: str) -> list[dict[str, Any]]:
+        """Parse <tool_call> blocks from LLM text output.
+
+        Deduplicates identical tool calls — Gemini Web sometimes repeats
+        the same ``<tool_call>`` block many times in a single response.
+        """
+        pattern = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
+        calls: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for match in pattern.finditer(text):
+            try:
+                raw = match.group(1).strip()
+                data = json.loads(raw)
+                if "name" not in data:
+                    continue
+                # Deduplicate by (name, sorted input)
+                dedup_key = json.dumps(
+                    {"name": data["name"], "input": data.get("input", {})},
+                    sort_keys=True,
+                )
+                if dedup_key in seen:
+                    logger.debug("Skipping duplicate tool_call: %s", data["name"])
+                    continue
+                seen.add(dedup_key)
+                calls.append(data)
+            except (json.JSONDecodeError, TypeError):
+                logger.debug("Failed to parse tool_call: %s", match.group(1)[:100])
+        return calls
+
+    @staticmethod
+    def _strip_tool_call_blocks(text: str) -> str:
+        """Remove <tool_call> blocks from final response text."""
+        return re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL).strip()
+
+    # ------------------------------------------------------------------
+    # Output validation — cross-check LLM text against tool data
+    # ------------------------------------------------------------------
+
+    # Regex patterns to extract prices from Chinese financial text
+    _PRICE_YUAN_RE = re.compile(r"(\d+\.?\d*)\s*元")
+    _PRICE_CURRENT_RE = re.compile(r"当前(?:股价|价格)[\s:：]*(\d+\.?\d*)")
+    _PRICE_CLOSE_RE = re.compile(r"收盘价[\s:：]*(\d+\.?\d*)")
+
+    def _validate_output(
+        self,
+        text: str,
+        tool_results: list[dict[str, Any]],
+    ) -> str:
+        """Cross-validate LLM output prices against real tool data.
+
+        Compares price mentions in the LLM's text with actual data returned
+        by tools like ``get_realtime_quote``, ``get_portfolio``, and
+        ``get_capital_balance``.  If a price differs by more than 5%, a
+        warning is appended to the text so the user sees the real number.
+
+        This is best-effort: parsing failures are silently ignored.
+        """
+        if not text or not tool_results:
+            return text
+
+        # Step 1: Extract real prices from tool results
+        real_prices: dict[str, float] = {}  # symbol -> price
+        for entry in tool_results:
+            try:
+                tool_name = entry.get("tool_name", "")
+                result_raw = entry.get("result", "")
+                if not result_raw:
+                    continue
+
+                data = (
+                    json.loads(result_raw)
+                    if isinstance(result_raw, str)
+                    else result_raw
+                )
+
+                if tool_name == "get_realtime_quote":
+                    # May be a single dict or list of dicts
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        symbol = item.get("symbol") or item.get("code", "")
+                        price = item.get("price") or item.get("current_price")
+                        if symbol and price is not None:
+                            try:
+                                real_prices[str(symbol)] = float(price)
+                            except (ValueError, TypeError):
+                                pass
+
+                elif tool_name in ("get_portfolio", "get_capital_balance"):
+                    # Portfolio may contain positions with current prices
+                    positions = []
+                    if isinstance(data, dict):
+                        positions = data.get("positions", data.get("holdings", []))
+                    elif isinstance(data, list):
+                        positions = data
+                    for pos in positions:
+                        if not isinstance(pos, dict):
+                            continue
+                        symbol = pos.get("symbol") or pos.get("code", "")
+                        price = (
+                            pos.get("current_price")
+                            or pos.get("price")
+                            or pos.get("last_price")
+                        )
+                        if symbol and price is not None:
+                            try:
+                                real_prices[str(symbol)] = float(price)
+                            except (ValueError, TypeError):
+                                pass
+
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                continue
+
+        if not real_prices:
+            return text
+
+        # Step 2: Extract prices mentioned in LLM text
+        llm_prices: list[float] = []
+        for pattern in (
+            self._PRICE_YUAN_RE,
+            self._PRICE_CURRENT_RE,
+            self._PRICE_CLOSE_RE,
+        ):
+            for m in pattern.finditer(text):
+                try:
+                    llm_prices.append(float(m.group(1)))
+                except (ValueError, IndexError):
+                    pass
+
+        if not llm_prices:
+            return text
+
+        # Step 3: Cross-validate — for each real price, check if at least
+        # one LLM-mentioned price matches.  If ANY price in the text is close
+        # to the real price, the LLM is using correct data — other numbers
+        # are likely indicators/targets/stops, not the current price.
+        warnings: list[str] = []
+        for symbol, real_price in real_prices.items():
+            if real_price <= 0:
+                continue
+            has_match = any(
+                abs(p - real_price) / real_price <= 0.05 for p in llm_prices if p > 0
+            )
+            if has_match:
+                continue  # LLM correctly cited the real price somewhere
+
+            # No matching price found — LLM may be using stale/fabricated data
+            # Find the closest LLM price to report
+            closest = min(
+                (
+                    p
+                    for p in llm_prices
+                    if p > 0 and 0.1 * real_price <= p <= 10 * real_price
+                ),
+                key=lambda p: abs(p - real_price),
+                default=None,
+            )
+            if closest is not None:
+                deviation = abs(closest - real_price) / real_price
+                warning = (
+                    f"\n\n⚠️ 数据校验提醒：工具返回 {symbol} "
+                    f"价格为 {real_price} 元，请以此为准。"
+                )
+                if warning not in warnings:
+                    warnings.append(warning)
+                    logger.warning(
+                        "Output validation mismatch: symbol=%s "
+                        "real=%.2f llm_closest=%.2f deviation=%.1f%%",
+                        symbol,
+                        real_price,
+                        closest,
+                        deviation * 100,
+                    )
+
+        if warnings:
+            text += "".join(warnings)
+
+        return text
+
+    # ------------------------------------------------------------------
     # Rich card extraction
     # ------------------------------------------------------------------
 
@@ -1371,7 +2560,7 @@ class AgentService:
 
         try:
             cards_data = json.loads(match.group(1))
-            return [
+            cards = [
                 RichCard(type=c.get("type", "unknown"), props=c.get("props", {}))
                 for c in cards_data
                 if isinstance(c, dict)
@@ -1379,6 +2568,70 @@ class AgentService:
         except (json.JSONDecodeError, TypeError):
             logger.warning("Failed to parse rich cards from agent reply")
             return []
+
+        return self._resolve_card_conflicts(cards)
+
+    @staticmethod
+    def _resolve_card_conflicts(cards: list[RichCard]) -> list[RichCard]:
+        """Remove trade_decision cards that conflict with stock_analysis cards.
+
+        When both card types exist for the same symbol, the stock_analysis
+        action is authoritative.  A trade_decision is dropped if:
+        - The stock_analysis recommends hold/watch (no actionable signal), or
+        - The trade_decision direction contradicts the stock_analysis
+          (e.g. analysis says hold but decision says sell).
+        """
+        # Build a map of stock_analysis actions by symbol
+        analysis_actions: dict[str, str] = {}
+        for card in cards:
+            if card.type == "stock_analysis":
+                sym = card.props.get("symbol")
+                action = card.props.get("action", "")
+                if sym and action:
+                    analysis_actions[sym] = action.lower()
+
+        if not analysis_actions:
+            return cards
+
+        _HOLD_ACTIONS = {"hold", "watch"}
+        _BUY_ACTIONS = {"buy", "add"}
+        _SELL_ACTIONS = {"sell", "reduce"}
+
+        filtered: list[RichCard] = []
+        for card in cards:
+            if card.type == "trade_decision":
+                sym = card.props.get("symbol")
+                analysis_action = analysis_actions.get(sym)
+                if analysis_action:
+                    decision_action = card.props.get("action", "").lower()
+                    # Drop if analysis says hold/watch
+                    if analysis_action in _HOLD_ACTIONS:
+                        logger.info(
+                            "Dropping trade_decision for %s: analysis=%s, "
+                            "decision=%s (hold/watch → no actionable card)",
+                            sym,
+                            analysis_action,
+                            decision_action,
+                        )
+                        continue
+                    # Drop if directions conflict
+                    if (
+                        analysis_action in _BUY_ACTIONS
+                        and decision_action in _SELL_ACTIONS
+                    ) or (
+                        analysis_action in _SELL_ACTIONS
+                        and decision_action in _BUY_ACTIONS
+                    ):
+                        logger.warning(
+                            "Dropping conflicting trade_decision for %s: "
+                            "analysis=%s but decision=%s",
+                            sym,
+                            analysis_action,
+                            decision_action,
+                        )
+                        continue
+            filtered.append(card)
+        return filtered
 
     # ------------------------------------------------------------------
     # Database operations
@@ -1436,7 +2689,8 @@ class AgentService:
                     decision_feedback TEXT,
                     status TEXT NOT NULL DEFAULT 'pending',
                     executed_at TEXT,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    gate_request_id TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS recommendations (
@@ -1453,6 +2707,34 @@ class AgentService:
                     actual_outcome TEXT,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS decision_journal (
+                    id TEXT PRIMARY KEY,
+                    timestamp TEXT NOT NULL,
+                    thread_id TEXT NOT NULL,
+                    symbol TEXT,
+                    action TEXT,
+                    confidence REAL,
+                    trigger_event TEXT,
+                    data_sources TEXT,
+                    key_evidence TEXT,
+                    sentiment_phase TEXT,
+                    portfolio_context TEXT,
+                    entry_price REAL,
+                    stop_loss REAL,
+                    target_price REAL,
+                    outcome_t1 REAL,
+                    outcome_t3 REAL,
+                    outcome_t5 REAL,
+                    outcome_status TEXT DEFAULT 'pending'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_journal_symbol
+                    ON decision_journal(symbol);
+                CREATE INDEX IF NOT EXISTS idx_journal_timestamp
+                    ON decision_journal(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_journal_status
+                    ON decision_journal(outcome_status);
                 """
             )
 
@@ -1472,6 +2754,17 @@ class AgentService:
                 )
             if "cc_session_id" not in thread_cols:
                 conn.execute("ALTER TABLE threads ADD COLUMN cc_session_id TEXT")
+            # I-107: background processing status
+            if "processing_status" not in thread_cols:
+                conn.execute(
+                    "ALTER TABLE threads ADD COLUMN processing_status TEXT DEFAULT 'ready'"
+                )
+
+            # I-105: add gate_request_id to trades if missing
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN gate_request_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     def _save_message(self, thread_id: str, msg: ChatMessage) -> None:
         """Persist a message to SQLite."""
@@ -1487,6 +2780,23 @@ class AgentService:
         )
 
         with self._connect() as conn:
+            # Ensure thread exists before inserting message (FK constraint)
+            exists = conn.execute(
+                "SELECT 1 FROM threads WHERE id = ?", (thread_id,)
+            ).fetchone()
+            if not exists:
+                logger.warning(
+                    "Thread %s not found for message save — creating stub",
+                    thread_id,
+                )
+                now = msg.timestamp or _now_iso()
+                conn.execute(
+                    "INSERT OR IGNORE INTO threads "
+                    "(id, title, context, created_at, updated_at) "
+                    "VALUES (?, ?, NULL, ?, ?)",
+                    (thread_id, "(auto-created)", now, now),
+                )
+
             conn.execute(
                 "INSERT INTO messages "
                 "(id, thread_id, role, content, rich_cards, tool_calls, timestamp, "
@@ -1934,13 +3244,15 @@ class AgentService:
 
             llm_messages.append(LLMMessage(role="assistant", content=assistant_content))
 
-            # Execute tools and build tool_result message
-            tool_results: list[dict[str, Any]] = []
-            for tc in llm_resp.tool_calls:
-                start = time.perf_counter()
-                result_str = await self._tools.execute(tc.name, tc.input)
-                elapsed = (time.perf_counter() - start) * 1000
+            # Execute tools concurrently (I-107 fix)
+            call_tuples = [(tc.name, tc.input) for tc in llm_resp.tool_calls]
+            batch_start = time.perf_counter()
+            result_strs = await self._tools.execute_parallel(call_tuples)
+            batch_elapsed = time.perf_counter() - batch_start
 
+            tool_results: list[dict[str, Any]] = []
+            for tc, result_str in zip(llm_resp.tool_calls, result_strs):
+                elapsed = (batch_elapsed / max(len(result_strs), 1)) * 1000
                 tool_results.append(
                     {
                         "type": "tool_result",

@@ -309,6 +309,100 @@ class TestLLMRouter:
         provider = router.get_provider(ProviderName.ANTHROPIC)
         assert provider is not None
 
+    @patch("src.llm.router.load_config")
+    @patch("src.llm.router._create_provider")
+    def test_fallback_does_not_pass_cross_provider_model(
+        self, mock_create, mock_config, mock_key_manager, mock_providers
+    ):
+        """Regression: when OpenAI fails and router falls back to Google,
+        the OpenAI model name (e.g. 'gpt-5.4-mini') must NOT be passed
+        to Google — it should use None (provider default) instead."""
+        mock_config.return_value = SAMPLE_LLM_CONFIG
+
+        # Make openai fail so it falls back to google
+        mock_providers[ProviderName.OPENAI].complete.side_effect = LLMProviderError(
+            "timeout"
+        )
+        # Make anthropic fail too
+        mock_providers[ProviderName.ANTHROPIC].complete.side_effect = LLMProviderError(
+            "timeout"
+        )
+
+        def side_effect(name, key, model, **kwargs):
+            return mock_providers.get(name)
+
+        mock_create.side_effect = side_effect
+
+        router = LLMRouter(key_manager=mock_key_manager)
+        messages = [LLMMessage(role="user", content="Test")]
+
+        result = router.complete(
+            messages,
+            preferred_provider=ProviderName.OPENAI,
+            model="gpt-5.4-mini",
+        )
+
+        # Google should be called with model=None (its own default)
+        google_call = mock_providers[ProviderName.GOOGLE].complete.call_args
+        assert (
+            google_call.kwargs.get("model") is None
+            or google_call[1].get("model") is None
+        ), f"Google was called with model={google_call}, expected model=None"
+        assert result.provider == ProviderName.GOOGLE
+
+    @patch("src.llm.router.load_config")
+    @patch("src.llm.router._create_provider")
+    def test_fallback_tools_does_not_pass_cross_provider_model(
+        self, mock_create, mock_config, mock_key_manager, mock_providers
+    ):
+        """Same regression test for complete_with_tools path."""
+        from src.llm.base import LLMToolResponse
+
+        mock_config.return_value = SAMPLE_LLM_CONFIG
+
+        # Make openai fail
+        mock_providers[
+            ProviderName.OPENAI
+        ].complete_with_tools.side_effect = LLMProviderError("timeout")
+        mock_providers[
+            ProviderName.ANTHROPIC
+        ].complete_with_tools.side_effect = LLMProviderError("timeout")
+        mock_providers[
+            ProviderName.GOOGLE
+        ].complete_with_tools.return_value = LLMToolResponse(
+            text="ok",
+            tool_calls=[],
+            stop_reason="end_turn",
+            provider=ProviderName.GOOGLE,
+            model="gemini-2.0-flash",
+            input_tokens=10,
+            output_tokens=20,
+            latency_ms=100,
+            cost_usd=0.0001,
+        )
+
+        def side_effect(name, key, model, **kwargs):
+            return mock_providers.get(name)
+
+        mock_create.side_effect = side_effect
+
+        router = LLMRouter(key_manager=mock_key_manager)
+        messages = [LLMMessage(role="user", content="Test")]
+
+        result = router.complete_with_tools(
+            messages=messages,
+            tools=[{"name": "test_tool"}],
+            preferred_provider=ProviderName.OPENAI,
+            model="gpt-5.4-mini",
+        )
+
+        google_call = mock_providers[ProviderName.GOOGLE].complete_with_tools.call_args
+        assert (
+            google_call.kwargs.get("model") is None
+            or google_call[1].get("model") is None
+        ), f"Google was called with model={google_call}, expected model=None"
+        assert result.provider == ProviderName.GOOGLE
+
 
 class TestRoutingStrategy:
     """Tests for RoutingStrategy enum."""

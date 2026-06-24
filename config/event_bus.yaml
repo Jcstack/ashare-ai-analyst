@@ -1,0 +1,26 @@
+# Event Bus configuration — Redis Streams-based pub/sub
+# Per PRD v50.0 §17.3: Event-driven architecture
+
+redis_url: "${REDIS_URL:-redis://redis:6379/0}"
+
+streams:
+  market: "events:market"        # price spikes, volume anomalies
+  news: "events:news"            # intelligence pipeline outputs
+  regime: "events:regime"        # sentiment/HMM state changes
+  signal: "events:signal"        # new signals detected
+  portfolio: "events:portfolio"  # position changes, fills
+  thesis: "events:thesis"        # thesis state changes
+  risk: "events:risk"            # risk limit breaches
+
+consumer_groups:
+  signal_engine: ["events:market", "events:news"]
+  portfolio_engine: ["events:signal", "events:portfolio", "events:regime"]
+  risk_engine: ["events:portfolio", "events:market", "events:regime"]
+  execution_team: ["events:signal", "events:risk"]
+  evaluation_team: ["events:portfolio", "events:thesis"]
+  notification: ["events:signal", "events:risk", "events:regime"]
+  event_agent: ["events:market"]  # v56.0: triggers mini InvestorAgent sessions
+
+batch_size: 10
+block_ms: 5000
+max_stream_length: 10000  # MAXLEN for XADD trimming

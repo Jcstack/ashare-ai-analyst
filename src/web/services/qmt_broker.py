@@ -8,6 +8,7 @@ Gracefully unavailable when XtQuant is not installed.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from src.utils.logger import get_logger
@@ -49,8 +50,13 @@ class QmtBroker(BrokerInterface):
 
         cfg = config or {}
         qmt_cfg = cfg.get("qmt", {})
-        self._account_id: str = qmt_cfg.get("account_id", "")
-        self._mini_qmt_path: str = qmt_cfg.get("mini_qmt_path", "")
+        # Env vars take precedence over YAML (sensitive credentials)
+        self._account_id: str = os.environ.get("QMT_ACCOUNT_ID") or qmt_cfg.get(
+            "account_id", ""
+        )
+        self._mini_qmt_path: str = os.environ.get("QMT_MINI_QMT_PATH") or qmt_cfg.get(
+            "mini_qmt_path", ""
+        )
         self._max_order_amount: float = qmt_cfg.get("max_order_amount", 100000)
         self._allowed_actions: list[str] = qmt_cfg.get(
             "allowed_actions", ["buy", "sell"]
@@ -59,7 +65,10 @@ class QmtBroker(BrokerInterface):
         self._connected = False
 
         if not self._account_id:
-            raise ValueError("QmtBroker requires qmt.account_id in config/broker.yaml")
+            raise ValueError(
+                "QmtBroker requires account ID. "
+                "Set QMT_ACCOUNT_ID env var or qmt.account_id in config/broker.yaml"
+            )
 
     def _ensure_connected(self) -> None:
         """Lazily connect to xttrader."""

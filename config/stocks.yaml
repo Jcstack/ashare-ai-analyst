@@ -25,6 +25,7 @@ cache:
   directory: data/raw
   format: parquet
   ttl_hours: 12
+  staleness_max_trading_days: 2  # Reject cache if last data date < N trading days ago
   naming: '{symbol}_{datatype}_{date}.parquet'
 request:
   interval_seconds: 0.5
@@ -40,11 +41,9 @@ data_sources:
   # EastMoney push2 access: curl_cffi client with Chrome TLS impersonation
   # Mode: auto (try direct, fallback to gateway) | direct | gateway
   # Gateway is used in VPN-blocked environments (isolated URL rewrite, no monkey-patch)
-  # Optional: set the host/IP of your own self-hosted akshare auth proxy here.
-  # Leave empty for direct access only. Never commit a real gateway/token to a public repo.
   eastmoney_proxy:
     enabled: true
-    gateway: ""
+    gateway: "101.201.173.125"
     mode: "auto"
     timeout: 15
     max_workers: 8

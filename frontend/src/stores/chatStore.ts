@@ -135,19 +135,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ messages: [userMsg] })
 
     try {
-      const { thread_id, reply } = await chatApi.createThread(message, effectiveContext)
+      const resp = await chatApi.createThread(message, effectiveContext)
+      const threadId = resp.thread_id
 
-      set({
-        activeThreadId: thread_id,
-        messages: [userMsg, reply],
-        sending: false,
-        pendingFirstMessage: false,
-      })
+      set({ activeThreadId: threadId })
+
+      if (resp.processing_status === "processing") {
+        // Background processing — poll until ready
+        await chatApi.pollThreadUntilReady(threadId, (thread) => {
+          // Update messages as they appear during polling
+          if (thread.messages.length > 0) {
+            set({ messages: thread.messages })
+          }
+        })
+
+        // Final load to get complete thread state
+        const finalThread = await chatApi.getThread(threadId)
+        set({
+          messages: finalThread.messages,
+          sending: false,
+          pendingFirstMessage: false,
+        })
+      } else if (resp.reply) {
+        // Synchronous response (legacy path)
+        set({
+          messages: [userMsg, resp.reply],
+          sending: false,
+          pendingFirstMessage: false,
+        })
+      }
 
       // Refresh thread list in background
       get().loadThreads()
 
-      return thread_id
+      return threadId
     } catch (err) {
       const errorMsg = extractErrorMessage(err)
       // Show error as an assistant message so user sees it inline

@@ -3,6 +3,8 @@ services:
     image: nginx:alpine
     ports:
       - "${PORT:-80}:80"
+    environment:
+      - TZ=Asia/Shanghai
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - frontend-dist:/usr/share/nginx/html:ro
@@ -14,15 +16,20 @@ services:
     restart: unless-stopped
 
   api:
-    build: .
+    build:
+      context: .
+      args:
+        HTTP_PROXY: http://host.docker.internal:6152
+        HTTPS_PROXY: http://host.docker.internal:6152
     expose:
       - "8000"
     env_file:
       - .env
     environment:
+      - TZ=Asia/Shanghai
       - HTTP_PROXY=http://host.docker.internal:6152
       - HTTPS_PROXY=http://host.docker.internal:6152
-      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.eastmoney.com
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.eastmoney.com,redis,qlib-service,searxng,.googleapis.com,.google.com,.discord.com,.discord.gg,discord.com,gateway.discord.gg
       - CLAUDE_CODE_BRIDGE_URL=http://host.docker.internal:19821
       - QLIB_SERVICE_URL=http://qlib-service:8001
     extra_hosts:
@@ -41,6 +48,12 @@ services:
       qlib-service:
         condition: service_started
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
@@ -52,10 +65,11 @@ services:
       -k uvicorn.workers.UvicornWorker
       --bind 0.0.0.0:8000
       --workers 2
-      --max-requests 10000
-      --max-requests-jitter 5000
+      --preload
+      --max-requests 5000
+      --max-requests-jitter 2000
       --graceful-timeout 60
-      --timeout 600
+      --timeout 1000
       --keep-alive 30
 
   frontend:
@@ -68,21 +82,50 @@ services:
     command: redis-server /usr/local/etc/redis/redis.conf
     ports:
       - "${REDIS_PORT:-6379}:6379"
+    environment:
+      - TZ=Asia/Shanghai
     volumes:
       - redis-data:/data
       - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      - TZ=Asia/Shanghai
+      - SEARXNG_BASE_URL=http://searxng:8080/
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-searxng-secret-key}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   qlib-service:
     build:
       context: .
       dockerfile: Dockerfile.qlib
+      args:
+        HTTP_PROXY: http://host.docker.internal:6152
+        HTTPS_PROXY: http://host.docker.internal:6152
     expose:
       - "8001"
+    environment:
+      - TZ=Asia/Shanghai
     volumes:
       - ./config:/app/config
       - ${HOME}/.qlib:/root/.qlib    # Qlib binary data shared with host
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 30s
@@ -91,14 +134,24 @@ services:
       start_period: 60s
 
   celery-worker:
-    build: .
-    command: celery -A openclaw.celery_app worker --loglevel=info
+    build:
+      context: .
+      args:
+        HTTP_PROXY: http://host.docker.internal:6152
+        HTTPS_PROXY: http://host.docker.internal:6152
+    command: >
+      celery -A openclaw.celery_app worker
+      --loglevel=info
+      --concurrency=2
+      --max-memory-per-child=512000
+      --prefetch-multiplier=1
     env_file:
       - .env
     environment:
+      - TZ=Asia/Shanghai
       - HTTP_PROXY=http://host.docker.internal:6152
       - HTTPS_PROXY=http://host.docker.internal:6152
-      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.eastmoney.com
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.eastmoney.com,redis,qlib-service,searxng,.googleapis.com,.google.com,.discord.com,.discord.gg,discord.com,gateway.discord.gg
       - QLIB_SERVICE_URL=http://qlib-service:8001
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -116,12 +169,61 @@ services:
       qlib-service:
         condition: service_started
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  always-on-agent:
+    build:
+      context: .
+      args:
+        HTTP_PROXY: http://host.docker.internal:6152
+        HTTPS_PROXY: http://host.docker.internal:6152
+    command: python -m openclaw.daemon
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+      - HTTP_PROXY=http://host.docker.internal:6152
+      - HTTPS_PROXY=http://host.docker.internal:6152
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.eastmoney.com,redis,qlib-service,searxng,.googleapis.com,.google.com,.discord.com,.discord.gg,discord.com,gateway.discord.gg
+      - QLIB_SERVICE_URL=http://qlib-service:8001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 114.114.114.114
+      - 8.8.8.8
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./workspace:/app/workspace
+    depends_on:
+      redis:
+        condition: service_started
+      qlib-service:
+        condition: service_started
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
 
   celery-beat:
-    build: .
+    build:
+      context: .
+      args:
+        HTTP_PROXY: http://host.docker.internal:6152
+        HTTPS_PROXY: http://host.docker.internal:6152
     command: celery -A openclaw.celery_app beat --loglevel=info
     env_file:
       - .env
+    environment:
+      - TZ=Asia/Shanghai
     dns:
       - 114.114.114.114
       - 8.8.8.8
@@ -133,14 +235,23 @@ services:
     restart: unless-stopped
 
   discord-bot:
-    build: .
+    build:
+      context: .
+      args:
+        HTTP_PROXY: http://host.docker.internal:6152
+        HTTPS_PROXY: http://host.docker.internal:6152
     command: python -m src.discord_bot
     env_file:
       - .env
     environment:
+      - TZ=Asia/Shanghai
+      # discord.py bot reads DISCORD_PROXY (not HTTPS_PROXY) to pass
+      # to aiohttp at session level. Env HTTPS_PROXY is set for pip/build
+      # but discord.py's bot.py explicitly reads HTTPS_PROXY and passes
+      # as proxy= kwarg to discord.Client, which handles it correctly.
       - HTTP_PROXY=http://host.docker.internal:6152
       - HTTPS_PROXY=http://host.docker.internal:6152
-      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.eastmoney.com
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,redis
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:

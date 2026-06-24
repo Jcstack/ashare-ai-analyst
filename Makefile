@@ -22,7 +22,7 @@ _stop:
 
 _clean-volumes:
 	@echo "==> 清空前端 dist 卷..."
-	docker volume rm ashare-ai-analyst_frontend-dist 2>/dev/null || true
+	docker volume rm marketing_frontend-dist 2>/dev/null || true
 
 _flush-celery:
 	@echo "==> 清理 Celery 队列..."
@@ -125,9 +125,9 @@ clean:
 	@echo "==> 停止并删除容器、网络..."
 	$(COMPOSE) down --remove-orphans -t 30
 	@echo "==> 删除无状态卷 (保留 redis-data)..."
-	docker volume rm ashare-ai-analyst_frontend-dist 2>/dev/null || true
+	docker volume rm marketing_frontend-dist 2>/dev/null || true
 	@echo "==> 删除构建镜像..."
-	docker rmi ashare-ai-analyst-api ashare-ai-analyst-frontend ashare-ai-analyst-celery-worker ashare-ai-analyst-celery-beat 2>/dev/null || true
+	docker rmi marketing-api marketing-frontend marketing-celery-worker marketing-celery-beat 2>/dev/null || true
 	@echo "==> 清理本地 Python 缓存..."
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
@@ -137,7 +137,7 @@ clean:
 # 彻底清理 (包括 redis-data, 慎用)
 purge: clean
 	@echo "==> 删除 redis-data 卷..."
-	docker volume rm ashare-ai-analyst_redis-data 2>/dev/null || true
+	docker volume rm marketing_redis-data 2>/dev/null || true
 	@echo "✅ 全部清理完成 (含 Redis 数据)"
 
 # Real integration tests (no mocks, real API calls)

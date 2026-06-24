@@ -42,6 +42,7 @@ export interface ChatThread {
   context?: ThreadContext | null
   created_at: string
   updated_at: string
+  processing_status?: "processing" | "ready" | "error"
 }
 
 export interface ThreadListItem {
@@ -68,7 +69,9 @@ export interface CreateThreadRequest {
 
 export interface CreateThreadResponse {
   thread_id: string
-  reply: ChatMessage
+  title: string
+  reply: ChatMessage | null
+  processing_status: "processing" | "ready" | "error"
 }
 
 export interface SendMessageRequest {

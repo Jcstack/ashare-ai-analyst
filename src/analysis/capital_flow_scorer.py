@@ -62,11 +62,12 @@ class CapitalFlowScorer:
 
     @property
     def weights(self) -> dict[str, float]:
+        # Northbound data discontinued Aug 2024 — redistribute weight
         return {
-            "northbound": self._weights.get("northbound", 0.35),
-            "margin": self._weights.get("margin", 0.25),
-            "southbound": self._weights.get("southbound", 0.20),
-            "etf": self._weights.get("etf", 0.20),
+            "northbound": 0.0,
+            "margin": self._weights.get("margin", 0.35),
+            "southbound": self._weights.get("southbound", 0.30),
+            "etf": self._weights.get("etf", 0.35),
         }
 
     def score_snapshot(

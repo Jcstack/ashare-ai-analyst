@@ -1,4 +1,8 @@
-"""Redis pub/sub listener — forwards ``notifications:push`` to Discord."""
+"""Redis pub/sub listener — forwards ``notifications:push`` to Discord.
+
+Routes channel-aware notification types through ChannelRouter when available,
+falls back to the legacy single-channel dispatch for other types.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +16,6 @@ from discord.ext import commands
 from src.discord_bot.embeds.capital_flow_card import build_capital_flow_embed
 from src.discord_bot.embeds.intel_card import build_intel_embed
 from src.discord_bot.embeds.market_card import build_market_embed
-from src.discord_bot.embeds.recommendation_card import build_recommendation_embed
 from src.discord_bot.embeds.risk_card import build_risk_embed
 from src.discord_bot.embeds.sentiment_card import build_sentiment_embed
 from src.discord_bot.embeds.trade_signal_card import (
@@ -24,9 +27,24 @@ from src.utils.logger import get_logger
 
 logger = get_logger("discord.cogs.push")
 
+# Notification types that should be routed through ChannelRouter
+_ROUTED_TYPES = frozenset(
+    {
+        "trade_signal",
+        "intraday_signal",
+        "risk_alert",
+        "thesis_invalidation",
+        "regime_change",
+        "morning_briefing",
+        "close_briefing",
+        "evening_review",
+        "system_health",
+    }
+)
+
 
 class PushNotificationsCog(commands.Cog):
-    """Subscribe to Redis ``notifications:push`` and dispatch to the channel."""
+    """Subscribe to Redis ``notifications:push`` and dispatch to channels."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -76,11 +94,21 @@ class PushNotificationsCog(commands.Cog):
                 pass
 
     # ------------------------------------------------------------------
+    # Channel router helper
+    # ------------------------------------------------------------------
+
+    def _get_router(self):
+        """Get the ChannelRouter cog if loaded."""
+        from src.discord_bot.cogs.channel_router import ChannelRouter
+
+        return self.bot.get_cog(ChannelRouter.__qualname__)
+
+    # ------------------------------------------------------------------
     # Dispatch logic
     # ------------------------------------------------------------------
 
     async def _dispatch(self, payload: dict[str, Any]) -> None:
-        """Route a notification payload to the appropriate embed builder."""
+        """Route a notification payload to the appropriate channel/embed."""
         from src.discord_bot.bot import AShareAnalystBot
 
         bot: AShareAnalystBot = self.bot  # type: ignore[assignment]
@@ -91,6 +119,23 @@ class PushNotificationsCog(commands.Cog):
             logger.debug("Ignoring push type: %s", notif_type)
             return
 
+        data = payload.get("data", payload)
+
+        # Try routing through ChannelRouter for supported types
+        if notif_type in _ROUTED_TYPES:
+            try:
+                routed = await self._dispatch_routed(notif_type, data)
+                if routed:
+                    return
+            except Exception:
+                logger.warning(
+                    "Routed dispatch failed for %s, falling back to legacy",
+                    notif_type,
+                    exc_info=True,
+                )
+            # Fall through to legacy dispatch if router unavailable or failed
+
+        # Legacy single-channel dispatch
         channel = await bot.get_push_channel()
         if channel is None:
             logger.warning("No push channel available")
@@ -101,20 +146,48 @@ class PushNotificationsCog(commands.Cog):
             logger.debug("No embed builder for type: %s", notif_type)
             return
 
-        await channel.send(embed=embed)
-        logger.info("Pushed %s notification to channel", notif_type)
+        try:
+            await channel.send(embed=embed)
+            logger.info("Pushed %s notification to channel", notif_type)
+        except Exception:
+            logger.warning(
+                "Failed to send %s to legacy channel", notif_type, exc_info=True
+            )
+
+    async def _dispatch_routed(self, notif_type: str, data: dict[str, Any]) -> bool:
+        """Dispatch through ChannelRouter. Returns True if handled."""
+        router = self._get_router()
+        if router is None:
+            logger.debug("ChannelRouter not available, falling back to legacy")
+            return False
+
+        if notif_type in ("trade_signal", "intraday_signal"):
+            return await router.push_trading_signal(data)
+
+        if notif_type == "thesis_invalidation":
+            return await router.push_risk_alert("thesis_invalidation", data)
+
+        if notif_type == "regime_change":
+            return await router.push_risk_alert("regime_change", data)
+
+        if notif_type == "risk_alert":
+            return await router.push_risk_alert("generic", data)
+
+        if notif_type == "morning_briefing":
+            return await router.push_morning_brief(data)
+
+        if notif_type in ("close_briefing", "evening_review"):
+            return await router.push_close_review(data)
+
+        if notif_type == "system_health":
+            return await router.push_system_health(data)
+
+        return False
 
     @staticmethod
     def _build_embed(notif_type: str, payload: dict[str, Any]) -> discord.Embed | None:
+        """Build embed for legacy single-channel dispatch."""
         data = payload.get("data", payload)
-
-        if notif_type == "recommendation":
-            recs = (
-                data.get("recommendations", [data])
-                if isinstance(data, dict)
-                else [data]
-            )
-            return build_recommendation_embed(recs)
 
         if notif_type == "market_overview":
             indices = data.get("indices", [])
@@ -139,7 +212,7 @@ class PushNotificationsCog(commands.Cog):
         if notif_type == "morning_briefing":
             return build_morning_briefing_embed(data)
 
-        if notif_type == "evening_review":
+        if notif_type in ("close_briefing", "evening_review"):
             return build_evening_review_embed(data)
 
         return None

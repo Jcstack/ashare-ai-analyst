@@ -14,7 +14,7 @@ realtime:
 
 news:
   max_items_per_stock: 20
-  sentiment_model: "claude-sonnet-4-6"
+  sentiment_model: "claude-opus-4-6"
   cache_ttl_seconds: 300
   hot_rank_limit: 50
 
@@ -28,8 +28,8 @@ anomaly:
   bollinger_std: 2.0
 
 ai_analysis:
-  quick_model: "claude-sonnet-4-6"
-  deep_model: "claude-sonnet-4-6"
+  quick_model: "claude-opus-4-6"
+  deep_model: "claude-opus-4-6"
   quick_cache_ttl_seconds: 300
   deep_cache_ttl_seconds: 1800
   max_tokens_quick: 2048

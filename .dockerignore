@@ -3,6 +3,7 @@
 .env
 .env.*
 .venv
+.venv-qlib
 __pycache__
 *.pyc
 data/

@@ -66,7 +66,8 @@ def mock_config():
 def mock_webhook_url(monkeypatch):
     """Set a fake DISCORD_WEBHOOK_URL environment variable."""
     monkeypatch.setenv(
-        "DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/test/fake"
+        "DISCORD_WEBHOOK_URL",
+        "https://discord.com/api/webhooks/12345678901234567/ABCDefgh1234567890_abcdefghijklmnop",
     )
 
 
@@ -374,7 +375,9 @@ class TestInitialization:
         notifier = DiscordNotifier()
 
         assert notifier.enabled is True
-        assert notifier.webhook_url == ("https://discord.com/api/webhooks/test/fake")
+        assert notifier.webhook_url == (
+            "https://discord.com/api/webhooks/12345678901234567/ABCDefgh1234567890_abcdefghijklmnop"
+        )
         assert notifier._timeout == 10
         assert notifier._max_retries == 3
 
@@ -390,3 +393,50 @@ class TestInitialization:
             assert "DISCORD_WEBHOOK_URL" in mock_logger.warning.call_args[0][0]
 
         assert notifier.webhook_url == ""
+
+    @pytest.mark.parametrize(
+        "placeholder_url",
+        [
+            "https://discord.com/api/webhooks/xxxxx/xxxxx",
+            "https://discord.com/api/webhooks/12345/xxxxx",
+            "not-a-url",
+            "https://discord.com/api/webhooks/short/token",
+        ],
+    )
+    def test_init_warns_on_placeholder_webhook(
+        self, mock_config, monkeypatch, placeholder_url
+    ):
+        """Verify placeholder/invalid webhook URLs are detected and disabled."""
+        monkeypatch.setenv("DISCORD_WEBHOOK_URL", placeholder_url)
+
+        from src.utils.notifier import DiscordNotifier
+
+        with patch("src.utils.notifier.logger") as mock_logger:
+            notifier = DiscordNotifier()
+            mock_logger.warning.assert_called_once()
+            assert "placeholder" in mock_logger.warning.call_args[0][0].lower()
+
+        assert notifier.webhook_url == ""
+        assert notifier._webhook_invalid is True
+
+    @patch("src.utils.notifier.requests.post")
+    def test_placeholder_webhook_no_log_spam(self, mock_post, mock_config, monkeypatch):
+        """Verify repeated sends with placeholder URL don't spam warning logs."""
+        monkeypatch.setenv(
+            "DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/xxxxx/xxxxx"
+        )
+
+        from src.utils.notifier import DiscordNotifier
+
+        notifier = DiscordNotifier()
+
+        with patch("src.utils.notifier.logger") as mock_logger:
+            # Multiple sends should NOT produce warning-level logs
+            notifier._post_webhook({"embeds": []})
+            notifier._post_webhook({"embeds": []})
+            notifier._post_webhook({"embeds": []})
+            mock_logger.warning.assert_not_called()
+            # Should use debug level instead
+            assert mock_logger.debug.call_count == 3
+
+        mock_post.assert_not_called()

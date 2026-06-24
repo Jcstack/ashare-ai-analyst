@@ -1,0 +1,368 @@
+# Global Intelligence Agent Teams Configuration
+# v39.0 — Per PRD-v39.0-global-intelligence-agent-teams.md
+
+# v54: Source attention weights (BlackRock BGRI pattern)
+# Higher weight = more influence on confidence scoring
+source_weights:
+  L1: 3.0   # Official (CSRC, PBOC, Fed press releases)
+  L2: 2.0   # Professional (broker research, EIA, ECB)
+  L3: 1.0   # Quality media (BBC, FT, SCMP, Guardian)
+  L4: 0.5   # Aggregators (RSS reposts, RSSHub)
+  L5: 0.3   # Social (Weibo, Guba, unverified)
+
+event_bus:
+  redis_url: "redis://redis:6379/1"
+  consumer_prefix: "git"
+  streams:
+    sentinel:raw_intel: {maxlen: 10000}
+    analyst:event_understood: {maxlen: 5000}
+    analyst:causal_chain: {maxlen: 5000}
+    analyst:event_state_change: {maxlen: 5000}
+    strategist:signal: {maxlen: 5000}
+    strategist:scenario: {maxlen: 5000}
+    messenger:push: {maxlen: 5000}
+
+# --- Sentinel Team ---
+sentinel:
+  refresh_intervals:
+    l1_l2: 300     # 5 min for official/authoritative sources
+    l3: 600        # 10 min for quality media
+    l4: 900        # 15 min for aggregators
+
+  rss_feeds:
+    # L1: Official/Authoritative
+    fed_press:
+      url: "https://www.federalreserve.gov/feeds/press_all.xml"
+      layer: L1
+      category: monetary_policy
+      language: en
+      enabled: true
+
+    ecb_press:
+      url: "https://www.ecb.europa.eu/rss/press.html"
+      layer: L2
+      category: monetary_policy
+      language: en
+      enabled: true
+
+    # L3: Quality Editorial — Global Geopolitics & Markets
+    # Reuters DNS broken → replaced with Al Jazeera + Guardian
+    al_jazeera:
+      url: "https://www.aljazeera.com/xml/rss/all.xml"
+      layer: L3
+      category: geopolitics
+      language: en
+      enabled: true
+
+    guardian_world:
+      url: "https://www.theguardian.com/world/rss"
+      layer: L3
+      category: geopolitics
+      language: en
+      enabled: true
+
+    guardian_business:
+      url: "https://www.theguardian.com/uk/business/rss"
+      layer: L3
+      category: markets
+      language: en
+      enabled: true
+
+    bbc_world:
+      url: "https://feeds.bbci.co.uk/news/world/rss.xml"
+      layer: L3
+      category: geopolitics
+      language: en
+      enabled: true
+
+    bbc_business:
+      url: "https://feeds.bbci.co.uk/news/business/rss.xml"
+      layer: L3
+      category: markets
+      language: en
+      enabled: true
+
+    ft_world:
+      url: "https://www.ft.com/rss/home"
+      layer: L3
+      category: markets
+      language: en
+      enabled: true
+
+    npr_world:
+      url: "https://feeds.npr.org/1004/rss.xml"
+      layer: L3
+      category: geopolitics
+      language: en
+      enabled: true
+
+    # L3: Asia & China
+    scmp_china:
+      url: "https://www.scmp.com/rss/91/feed"
+      layer: L3
+      category: china_policy
+      language: en
+      enabled: true
+
+    nikkei_asia:
+      url: "https://asia.nikkei.com/rss/feed/nar"
+      layer: L3
+      category: asia_markets
+      language: en
+      enabled: true
+
+    # L3: Defense & Security (CSIS/DefenseOne 404 → Atlantic Council + War on Rocks)
+    atlantic_council:
+      url: "https://www.atlanticcouncil.org/feed/"
+      layer: L3
+      category: geopolitics
+      language: en
+      enabled: true
+
+    war_on_rocks:
+      url: "https://warontherocks.com/feed/"
+      layer: L3
+      category: defense
+      language: en
+      enabled: true
+
+    # L3: Tech
+    techcrunch:
+      url: "https://techcrunch.com/feed/"
+      layer: L3
+      category: tech
+      language: en
+      enabled: true
+
+    ars_technica:
+      url: "https://feeds.arstechnica.com/arstechnica/index"
+      layer: L3
+      category: tech
+      language: en
+      enabled: true
+
+    the_verge:
+      url: "https://www.theverge.com/rss/index.xml"
+      layer: L3
+      category: tech
+      language: en
+      enabled: true
+
+    # L4: Chinese financial media — rsshub.app is 403, disabled.
+    # Chinese news now served by cn_news_direct.py (Sina 7x24 + WSCN + Jin10)
+    # Re-enable these after self-hosting RSSHub (docker-compose rsshub service)
+    cls_telegraph:
+      url: "https://rsshub.app/cls/telegraph"
+      layer: L4
+      category: market_flash
+      language: zh
+      enabled: false  # rsshub.app 403 — use cn_news_direct instead
+
+    wallstreetcn_global:
+      url: "https://rsshub.app/wallstreetcn/news/global"
+      layer: L4
+      category: markets
+      language: zh
+      enabled: false  # rsshub.app 403 — use cn_news_direct instead
+
+    yicai_brief:
+      url: "https://rsshub.app/yicai/brief"
+      layer: L4
+      category: china_economy
+      language: zh
+      enabled: false  # rsshub.app 403
+
+    gelonghui:
+      url: "https://rsshub.app/gelonghui/live"
+      layer: L4
+      category: markets
+      language: zh
+      enabled: false  # rsshub.app 403
+
+    jin10:
+      url: "https://rsshub.app/jin10"
+      layer: L4
+      category: market_flash
+      language: zh
+      enabled: false  # rsshub.app 403 — use cn_news_direct instead
+
+    zaobao_realtime:
+      url: "https://rsshub.app/zaobao/realtime/china"
+      layer: L4
+      category: china_policy
+      language: zh
+      enabled: false  # rsshub.app 403
+
+    # Energy & Commodities
+    eia_updates:
+      url: "https://www.eia.gov/rss/todayinenergy.xml"
+      layer: L2
+      category: energy
+      language: en
+      enabled: true
+
+    oilprice:
+      url: "https://oilprice.com/rss/main"
+      layer: L3
+      category: energy
+      language: en
+      enabled: true
+
+    # Geopolitics / Defense
+    foreign_affairs:
+      url: "https://www.foreignaffairs.com/rss.xml"
+      layer: L3
+      category: geopolitics
+      language: en
+      enabled: true
+
+    defense_one:
+      url: "https://www.defenseone.com/rss/"
+      layer: L3
+      category: defense
+      language: en
+      enabled: false  # 404 — replaced by war_on_rocks + atlantic_council
+
+    csis:
+      url: "https://www.csis.org/analysis/feed"
+      layer: L3
+      category: geopolitics
+      language: en
+      enabled: false  # 404 — replaced by atlantic_council
+
+    # China-specific (rsshub.app 403 — disabled, use cn_news_direct)
+    xinhua_world:
+      url: "https://rsshub.app/xinhuanet/whxw"
+      layer: L2
+      category: china_policy
+      language: zh
+      enabled: false  # rsshub.app 403
+
+    caixin_economy:
+      url: "https://rsshub.app/caixin/latest"
+      layer: L3
+      category: china_economy
+      language: zh
+      enabled: false  # rsshub.app 403
+
+    thepaper:
+      url: "https://rsshub.app/thepaper/featured"
+      layer: L4
+      category: china_general
+      language: zh
+      enabled: false  # rsshub.app 403
+
+    # Crypto / Alternative
+    coindesk:
+      url: "https://www.coindesk.com/arc/outboundfeeds/rss/"
+      layer: L4
+      category: crypto
+      language: en
+      enabled: true
+
+  # Social sources (Phase 5)
+  social:
+    telegram_channels: []  # Placeholder
+    twitter_kols: []       # Placeholder
+    xueqiu:
+      enabled: false
+      hot_rank_threshold: 50
+
+  # Prediction markets (Phase 5)
+  prediction_markets:
+    polymarket:
+      enabled: false
+      base_url: "https://clob.polymarket.com"
+      relevance_keywords: ["China", "Iran", "Russia", "tariff", "Fed", "oil", "trade", "Taiwan"]
+
+# --- Analyst Team ---
+analyst:
+  event_understanding:
+    # ContentScore threshold to trigger LLM analysis
+    score_threshold: 40
+    # LLM model routing by source layer
+    model_routing:
+      l1_l2: "deepseek-chat"    # High priority → DeepSeek (best Chinese NLP)
+      l3: "deepseek-chat"       # Medium → DeepSeek
+      l4_l5: "deepseek-chat"    # Low → DeepSeek (cheapest)
+    # A-share relevance threshold to publish event
+    relevance_threshold: 0.3
+    # Max LLM calls per refresh cycle
+    max_llm_calls_per_cycle: 20
+    # Batch size for tier 2/3 analysis
+    batch_size: 5
+
+  causal_chain:
+    # Path to extended templates
+    templates_file: "config/impact_chain_templates.yaml"
+    # Whether to use LLM fallback when no template matches
+    llm_fallback: true
+    # Minimum A-share relevance to trigger LLM chain building
+    llm_relevance_threshold: 0.4
+    # Auto-persist discovered chains as candidate templates
+    auto_persist_discoveries: true
+
+  event_tracker:
+    # Hours without mention before RESOLVED
+    resolve_after_hours: 48
+    # Mention frequency multiplier for ESCALATING
+    escalation_multiplier: 3.0
+    # Hours at PEAK before DE_ESCALATING
+    peak_cooldown_hours: 6
+    # Max concurrent tracked events
+    max_active_events: 50
+
+  historical_analogy:
+    # Seed data file path
+    seed_file: "data/event_history_seed.json"
+    # Top-K analogies to return
+    top_k: 3
+    # Use embeddings (requires sentence-transformers)
+    use_embeddings: false  # Enable when sentence-transformers installed
+
+# --- Strategist Team ---
+strategist:
+  scenario_planner:
+    # Only generate scenarios for events in these states
+    trigger_states: ["developing", "escalating", "relapsed"]
+    # LLM model for scenario generation
+    model: "deepseek-chat"
+    max_tokens: 1500
+
+  risk_assessor:
+    # Compound risk score threshold for CRITICAL alert
+    critical_threshold: 70
+    # Points per escalating event
+    event_weight: 15
+    # Points per BlackSwan alert
+    black_swan_weight: 20
+    # Points per cross-domain overlap
+    domain_overlap_weight: 10
+
+  opportunity_scanner:
+    # Minimum chain confidence to scan for opportunities
+    min_chain_confidence: 0.5
+    # Require capital flow confirmation
+    require_flow_confirmation: false
+
+# --- Messenger Team ---
+messenger:
+  alert_routing:
+    # Priority → channel mapping
+    critical: "immediate+discord"
+    high: "immediate"
+    normal: "next_ooda_cycle"
+    low: "daily_digest"
+
+  digest:
+    # Pre-market digest time (CST)
+    pre_market_time: "08:30"
+    # Post-market digest time (CST)
+    post_market_time: "15:30"
+    # LLM model for digest generation
+    model: "deepseek-chat"
+    max_tokens: 800
+
+  dedup:
+    # Redis TTL for event dedup (hours)
+    ttl_hours: 4

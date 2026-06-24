@@ -38,7 +38,6 @@ def _isolate_test_databases(tmp_path_factory):
     import src.intelligence_hub.info_store as _m_is
     import src.intelligence_hub.report_store as _m_irs
     import src.intelligence_hub.delivery_tracker as _m_dt
-    import src.recommendation.rec_store as _m_rs
     import src.market_intelligence.signal_store as _m_ss
     import src.market_intelligence.notification_log as _m_nl
 
@@ -53,7 +52,6 @@ def _isolate_test_databases(tmp_path_factory):
         _m_is,
         _m_irs,
         _m_dt,
-        _m_rs,
         _m_ss,
         _m_nl,
     ]

@@ -5,6 +5,8 @@ technical indicators, candlestick patterns, and support/resistance levels into
 a comprehensive analysis request.
 
 Per PRD FR-P001: Config-driven prompt construction with enforced output schema.
+
+v52: Added context-driven PromptBuilderV2 and compressed templates.
 """
 
 from typing import Any
@@ -16,9 +18,260 @@ from src.utils.logger import get_logger
 
 logger = get_logger("prediction.prompts")
 
-# Output JSON schema template embedded in the system prompt
+# ============================================================================
+# v52 Context-driven prompts (NEW)
+# ============================================================================
+
+DECISION_OUTPUT_SCHEMA = """\
+```json
+{{
+  "action": "buy | sell | hold | reduce | watch | no_trade",
+  "stock": "6-digit symbol code",
+  "confidence": 0.0-1.0,
+  "reasoning_chain": {{
+    "base_rate_assessment": "该板块/股票历史胜率判断 + 是否偏离",
+    "evidence_direction": "bullish | bearish | mixed",
+    "key_evidence": ["最重要的2-3条证据，必须引用快照中的具体数值"],
+    "conflicting_evidence": ["与结论矛盾的证据，如果没有写'无明显矛盾'"],
+    "portfolio_fit": "对现有持仓集中度/风险的影响"
+  }},
+  "entry_range": {{"low": 0.00, "high": 0.00}},
+  "stop_loss": {{"price": 0.00, "basis": "止损依据(支撑位/ATR/固定比例)"}},
+  "target_price": {{"price": 0.00, "basis": "目标依据(压力位/估值/催化)"}},
+  "position_size_pct": 0.0-30.0,
+  "holding_period_days": 0,
+  "invalidation": "立即退出的条件（具体价格或事件）",
+  "contingency": "如果价格反向运动，应该怎么做"
+}}
+```
+
+confidence 约束:
+- 0.00-0.30: action 只能是 watch 或 no_trade
+- 0.30-0.50: action 只能是 watch/hold/reduce
+- 0.50-0.70: 所有 action 允许，但必须列出 conflicting_evidence
+- 0.70-1.00: 所有 action 允许，必须确认 ≥3 条独立证据支持
+
+如果数据不足以形成判断，必须输出:
+{{"action": "no_trade", "confidence": 0.15, "reasoning_chain": {{"base_rate_assessment": "数据不足", "evidence_direction": "mixed", "key_evidence": [], "conflicting_evidence": ["数据缺失无法判断"], "portfolio_fit": "N/A"}}}}
+"""
+
+ANALYSIS_SYSTEM_PROMPT = """\
+你是一个管理实盘A股组合的AI投资决策者。用户是执行交易员——你下指令，用户执行。
+
+## 决策原则
+1. 只使用快照中注入的数据。绝不编造数据。缺失标记"无数据"。
+2. 区分事实与推断。事实=快照中的数值；推断=你的判断，必须标注置信度。
+3. 每个买入决策必须回答：为什么买？为什么现在？优势在哪？风险是什么？仓位多少？何时退出？
+4. 证据不足时降低 confidence，不要为凑高分而忽略矛盾信号。
+5. 止损价必须低于现价（做多）。目标价必须基于技术位/估值。
+6. 用散户能听懂的中文，不要使用 MACD/RSI/PE 等术语。
+
+## 数据解读规则
+- 资金流：正值=净流入（买方强于卖方），负值=净流出
+- 量比：>1.5 放量，<0.7 缩量，1.0 为近20日均量
+- 贝叶斯P(涨)：>0.60 偏多，<0.40 偏空，0.40-0.60 中性
+- 收敛分数：衡量多少独立信号源方向一致，≥2源才能发出买入信号
+- 情绪周期：冰点(极度悲观)→启动(开始回暖)→加速(赚钱效应扩散)→高潮(过热)→退潮(亏钱效应)
+
+## 输出格式
+严格输出以下 JSON:
+{output_schema}
+"""
+
+ANALYSIS_USER_TEMPLATE = """\
+## 市场快照（数据截止时间见快照头部）
+
+{market_snapshot_text}
+
+## 任务
+
+基于上述完整市场快照，对 {stock_name}（{symbol}）做出投资决策。
+
+要求：
+1. 先评估基础胜率，再逐条检查证据
+2. 如果持仓信息存在，必须考虑组合集中度影响
+3. 如果存在矛盾证据，必须在 conflicting_evidence 中列出
+4. 输出中文
+"""
+
+MACRO_SYSTEM_PROMPT = """\
+你是A股组合经理，分析宏观事件对A股的传导效应。
+
+## 分析框架
+1. 识别事件性质：政策/地缘/货币/贸易/产业
+2. 构建传导链：事件 → 一阶影响 → 二阶影响 → A股板块影响
+3. 区分时间维度：短期冲击(1-3天) vs 中期趋势(1-4周)
+4. 评估市场定价：该事件是否已被市场充分消化？
+
+## 约束
+- 只使用注入数据，缺失标记"无数据"
+- 每条传导链必须标注置信度衰减（链越长置信度越低）
+- 不要把相关性当因果性
+
+输出 JSON:
+```json
+{{
+  "signal": "bullish | bearish | neutral",
+  "confidence": 0.0-1.0,
+  "headline": "一句话概括（中文）",
+  "transmission_chain": [
+    {{"order": 1, "cause": "事件直接影响", "effect": "一阶市场反应", "confidence": 0.0-1.0}},
+    {{"order": 2, "cause": "一阶反应", "effect": "二阶板块影响", "confidence": 0.0-1.0}}
+  ],
+  "sectors_bullish": [{{"sector": "板块名", "reason": "原因", "time_horizon": "短期|中期"}}],
+  "sectors_bearish": [{{"sector": "板块名", "reason": "原因", "time_horizon": "短期|中期"}}],
+  "risks": ["该判断可能错误的情形1", "情形2"],
+  "already_priced_in": "已充分消化 | 部分消化 | 尚未反应",
+  "data_sufficiency": "充分 | 一般 | 不足"
+}}
+```
+"""
+
+MACRO_USER_TEMPLATE = """\
+## 宏观数据快照
+
+{macro_snapshot_text}
+
+## 全球市场数据
+
+{global_data_text}
+
+## 任务
+
+分析以上宏观事件对A股市场和板块的传导效应。
+要求：构建因果传导链（不少于2环），区分短期冲击和中期趋势，评估市场是否已定价。
+输出中文。
+"""
+
+QUICK_DECISION_TEMPLATE = """\
+{market_snapshot_text}
+
+快速判断 {symbol}：
+1. 方向：bullish/bearish/neutral（引用1条关键数据）
+2. 信心：0.0-1.0
+3. 风险：一句话
+输出 JSON: {{"action": "{action_type}", "stock": "{symbol}", "confidence": 0.0-1.0, "reason": "一句话+数据引用", "risk": "一句话", "evidence_cited": "引用的具体数值"}}
+"""
+
+
+class PromptBuilderV2:
+    """Context-driven prompt builder (v52).
+
+    Replaces role-based prompts with context-based prompts.
+    Expects pre-built MarketSnapshot text as input.
+    """
+
+    @staticmethod
+    def build_decision_prompt(
+        snapshot_text: str,
+        stock_name: str,
+        symbol: str,
+    ) -> list[dict[str, str]]:
+        """Build decision prompt from MarketSnapshot text.
+
+        Args:
+            snapshot_text: Pre-serialized market snapshot string from
+                MarketSnapshot.serialize_for_llm().
+            stock_name: Human-readable stock name.
+            symbol: 6-digit stock code.
+
+        Returns:
+            List of message dicts with role and content keys.
+        """
+        system_content = ANALYSIS_SYSTEM_PROMPT.format(
+            output_schema=DECISION_OUTPUT_SCHEMA
+        )
+        user_content = ANALYSIS_USER_TEMPLATE.format(
+            market_snapshot_text=snapshot_text,
+            stock_name=stock_name,
+            symbol=symbol,
+        )
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ]
+        logger.debug(
+            "PromptBuilderV2.build_decision_prompt %s: sys=%d user=%d chars",
+            symbol,
+            len(system_content),
+            len(user_content),
+        )
+        return messages
+
+    @staticmethod
+    def build_quick_prompt(
+        snapshot_text: str,
+        symbol: str,
+        action_type: str = "分析",
+    ) -> list[dict[str, str]]:
+        """Build compressed quick-decision prompt.
+
+        Args:
+            snapshot_text: Pre-serialized market snapshot string.
+            symbol: 6-digit stock code.
+            action_type: Action context string (e.g. "分析", "买入", "卖出").
+
+        Returns:
+            List of message dicts with role and content keys.
+        """
+        system_content = ANALYSIS_SYSTEM_PROMPT.format(
+            output_schema=DECISION_OUTPUT_SCHEMA
+        )
+        user_content = QUICK_DECISION_TEMPLATE.format(
+            market_snapshot_text=snapshot_text,
+            symbol=symbol,
+            action_type=action_type,
+        )
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ]
+        logger.debug(
+            "PromptBuilderV2.build_quick_prompt %s: sys=%d user=%d chars",
+            symbol,
+            len(system_content),
+            len(user_content),
+        )
+        return messages
+
+    @staticmethod
+    def build_macro_prompt(
+        macro_snapshot_text: str,
+        global_data_text: str,
+    ) -> list[dict[str, str]]:
+        """Build macro analysis prompt.
+
+        Args:
+            macro_snapshot_text: Pre-serialized macro event data.
+            global_data_text: Pre-serialized global market data.
+
+        Returns:
+            List of message dicts with role and content keys.
+        """
+        system_content = MACRO_SYSTEM_PROMPT
+        user_content = MACRO_USER_TEMPLATE.format(
+            macro_snapshot_text=macro_snapshot_text,
+            global_data_text=global_data_text,
+        )
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ]
+        logger.debug(
+            "PromptBuilderV2.build_macro_prompt: sys=%d user=%d chars",
+            len(system_content),
+            len(user_content),
+        )
+        return messages
+
+
+# ============================================================================
+# DEPRECATED: Legacy prompts below — use ANALYSIS_* / PromptBuilderV2 instead
+# ============================================================================
+
+# DEPRECATED: use DECISION_OUTPUT_SCHEMA instead
 _OUTPUT_SCHEMA_TEMPLATE = """\
-你必须严格按照以下 JSON 格式输出分析结果，不要添加任何多余文字：
+You must output analysis results strictly in the following JSON format. Do not add any extra text.
 
 ```json
 {{
@@ -41,83 +294,82 @@ _OUTPUT_SCHEMA_TEMPLATE = """\
 }}
 ```
 
-必需字段: {required_fields}
+Required fields: {required_fields}
 """
 
+# DEPRECATED: use ANALYSIS_SYSTEM_PROMPT instead
 _SYSTEM_PROMPT_TEMPLATE = """\
-你是一名专业的A股股票分析师。请严格基于提供的数据进行技术分析，输出中文分析结果。
+You are an AI portfolio manager managing a real A-share portfolio.
+Perform technical analysis strictly based on injected data. Write all output text in Chinese.
+Each analysis must end with an actionable decision conclusion.
 
-分析规则：
-1. 仅基于提供的历史数据和技术指标进行分析，禁止使用未来数据
-2. 分析必须覆盖趋势、指标、形态三个维度
-3. 置信度必须在 0 到 1 之间，反映分析的确定性
-4. 风险等级需综合考虑市场环境和个股波动
-5. 目标价格区间需基于支撑/阻力位和技术分析得出
-6. 如果提供了宏观资金面数据，需综合考虑以下资金维度：
-   - 资金环境评分反映整体资金面松紧，正值偏多、负值偏空
-   - 北向资金净流入代表外资态度，持续净流入为增量信号
-   - 南向资金大幅流出A股（即南向净买入为正）可能意味着资金分流
-   - ETF净流入反映机构配置意愿，持续净申购表明机构看多
-   - 融资余额变动反映杠杆资金情绪，持续增长为风险偏好上升
-   - 当北向资金与ETF资金方向一致时，信号可信度更高
-
+Rules: Use only historical data + technical indicators. Cover trend / indicator / pattern dimensions.
+Confidence range 0-1. Target price based on support/resistance levels.
+Stop-loss must be below current price. Never fabricate numbers.
+Capital flow: northbound + ETF aligned = high confidence; rising margin balance = risk appetite increase.
+{portfolio_context}
 {output_schema}
 """
 
+# DEPRECATED: use PromptBuilderV2.build_decision_prompt instead
 REALTIME_ANALYSIS_TEMPLATE = """\
-## 实时分析请求
+## Real-time Analysis Request
 
-### 股票代码: {symbol}
+### Stock Code: {symbol}
 
-### 实时行情
+### Real-time Quote
 {quote_info}
 
-### 所属概念板块
+### Concept Sectors
 {concept_info}
 
-### 近期新闻
+### Recent News
 {news_info}
 
-### 异动信息
+### Anomaly Information
 {anomaly_info}
 
-### 技术指标
+### Technical Indicators
 {indicators_info}
 
-### 盘中买卖盘统计
+### Intraday Bid-Ask Statistics
 {intraday_trades_info}
 
-### 量化策略信号
+### Quantitative Strategy Signals
 {strategy_signals_info}
 
-### 贝叶斯历史概率分析
+### Bayesian Historical Probability Analysis
 {bayesian_info}
 
-请综合以上数据（包括概念板块共振、买卖盘统计、量化策略信号和贝叶斯概率），结合当前市场时段对该股票进行全面分析，给出投资建议。
-严格按照指定JSON格式输出。
+Synthesize all data above (including concept sector resonance, bid-ask statistics, quant strategy signals, and Bayesian probabilities), combined with current market session timing, to produce a comprehensive analysis of this stock with investment recommendations.
+Output strictly in the specified JSON format. Write all output text in Chinese.
 """
 
+# DEPRECATED: use PromptBuilderV2.build_quick_prompt instead
 QUICK_INSIGHT_TEMPLATE = """\
-股票{symbol} | {quote_info}
-技术指标: {indicators_info}{strategy_consensus}
-一句话给出信号和理由。
+Stock {symbol} | {quote_info}
+Technical indicators: {indicators_info}{strategy_consensus}
+Give a one-sentence signal and reason. Output in Chinese.
 """
 
+# DEPRECATED: use PromptBuilderV2.build_macro_prompt instead
 MARKET_BRIEFING_TEMPLATE = """\
-## 市场概览
+## Market Overview
 
-### 主要指数
+### Major Indices
 {indices_info}
 
-### 热门股票
+### Hot Stocks
 {hot_stocks_info}
 
-请基于当前市场时段，生成A股市场概览分析。
+Based on the current market session, generate an A-share market overview analysis. Output in Chinese.
 """
 
 
 class PromptBuilder:
-    """Builds structured prompt messages for Claude API analysis requests.
+    """DEPRECATED: Use PromptBuilderV2 instead.
+
+    Builds structured prompt messages for Claude API analysis requests.
 
     Formats stock data, technical indicators, candlestick patterns, and
     support/resistance levels into a structured multi-message prompt
@@ -154,8 +406,7 @@ class PromptBuilder:
     ) -> list[dict[str, str]]:
         """Build a complete message list for the Claude API analysis call.
 
-        Constructs a system message with output schema instructions and a
-        user message containing formatted stock data for analysis.
+        DEPRECATED: Use PromptBuilderV2.build_decision_prompt instead.
 
         Args:
             symbol: 6-digit stock code (e.g. ``"000001"``).
@@ -175,7 +426,9 @@ class PromptBuilder:
         output_schema = _OUTPUT_SCHEMA_TEMPLATE.format(
             required_fields=", ".join(self._required_fields)
         )
-        system_content = _SYSTEM_PROMPT_TEMPLATE.format(output_schema=output_schema)
+        system_content = _SYSTEM_PROMPT_TEMPLATE.format(
+            output_schema=output_schema, portfolio_context=""
+        )
 
         ohlcv_summary = self._format_ohlcv_summary(ohlcv_df)
         indicators_text = self._format_indicators(indicators)
@@ -183,13 +436,13 @@ class PromptBuilder:
         sr_text = self._format_sr_levels(sr_levels)
 
         user_content = (
-            f"## 股票代码: {symbol}\n\n"
-            f"### 近期行情数据 (OHLCV)\n{ohlcv_summary}\n\n"
-            f"### 技术指标\n{indicators_text}\n\n"
-            f"### K线形态\n{patterns_text}\n\n"
-            f"### 支撑/阻力位\n{sr_text}\n\n"
-            f"请基于以上数据，对该股票进行全面的技术分析，"
-            f"并严格按照指定的 JSON 格式输出结果。"
+            f"## Stock Code: {symbol}\n\n"
+            f"### Recent OHLCV Data\n{ohlcv_summary}\n\n"
+            f"### Technical Indicators\n{indicators_text}\n\n"
+            f"### Candlestick Patterns\n{patterns_text}\n\n"
+            f"### Support / Resistance Levels\n{sr_text}\n\n"
+            f"Based on the data above, perform a comprehensive technical analysis of this stock "
+            f"and output results strictly in the specified JSON format. Write all output text in Chinese."
         )
 
         messages = [
@@ -219,8 +472,8 @@ class PromptBuilder:
 
         lines: list[str] = []
         header = (
-            f"{'日期':<12} {'开盘':>8} {'最高':>8} "
-            f"{'最低':>8} {'收盘':>8} {'成交量':>12}"
+            f"{'Date':<12} {'Open':>8} {'High':>8} "
+            f"{'Low':>8} {'Close':>8} {'Volume':>12}"
         )
         lines.append(header)
         lines.append("-" * len(header))
@@ -292,9 +545,9 @@ class PromptBuilder:
 
             parts = [f"- {name} ({pattern_type})"]
             if date:
-                parts.append(f"出现日期: {date}")
+                parts.append(f"Date: {date}")
             if reliability:
-                parts.append(f"可靠性: {reliability}")
+                parts.append(f"Reliability: {reliability}")
 
             lines.append(" | ".join(parts))
 
@@ -320,10 +573,10 @@ class PromptBuilder:
             sr_type = sr.get("type", "unknown")
             strength = sr.get("strength", "")
 
-            label = "支撑位" if sr_type == "support" else "阻力位"
+            label = "Support" if sr_type == "support" else "Resistance"
             parts = [f"- {label}: {level:.2f}"]
             if strength:
-                parts.append(f"强度: {strength}")
+                parts.append(f"Strength: {strength}")
 
             lines.append(" | ".join(parts))
 
@@ -336,8 +589,7 @@ class PromptBuilder:
     ) -> list[dict[str, str]]:
         """Build a prompt for broad market overview analysis.
 
-        Constructs a system message and a user message containing market
-        index data and macro indicators for a market-level assessment.
+        DEPRECATED: Use PromptBuilderV2.build_macro_prompt instead.
 
         Args:
             index_data: Mapping of index code to OHLCV DataFrame (e.g.
@@ -350,9 +602,11 @@ class PromptBuilder:
             suitable for passing to the Anthropic Messages API.
         """
         system_content = (
-            "你是一名专业的A股市场分析师。请基于提供的大盘指数数据和市场指标，"
-            "对当前市场整体状况进行分析。\n\n"
-            "你必须严格按照以下 JSON 格式输出分析结果，不要添加任何多余文字：\n\n"
+            "You are a professional A-share market analyst. Based on the provided index data "
+            "and market indicators, analyze the current overall market conditions.\n"
+            "Write all output text in Chinese.\n\n"
+            "You must output analysis results strictly in the following JSON format. "
+            "Do not add any extra text:\n\n"
             "```json\n"
             "{\n"
             '  "market_trend": "bullish | bearish | neutral",\n'
@@ -371,17 +625,17 @@ class PromptBuilder:
         index_sections: list[str] = []
         for code, df in index_data.items():
             summary = self._format_ohlcv_summary(df)
-            index_sections.append(f"#### 指数 {code}\n{summary}")
+            index_sections.append(f"#### Index {code}\n{summary}")
 
-        index_text = "\n\n".join(index_sections) if index_sections else "无指数数据"
+        index_text = "\n\n".join(index_sections) if index_sections else "No index data"
         indicators_text = self._format_indicators(market_indicators)
 
         user_content = (
-            "## 市场概览分析\n\n"
-            f"### 主要指数行情\n{index_text}\n\n"
-            f"### 市场指标\n{indicators_text}\n\n"
-            "请基于以上数据，对A股市场整体趋势进行分析，"
-            "并严格按照指定的 JSON 格式输出结果。"
+            "## Market Overview Analysis\n\n"
+            f"### Major Index Data\n{index_text}\n\n"
+            f"### Market Indicators\n{indicators_text}\n\n"
+            "Based on the data above, analyze the overall A-share market trend "
+            "and output results strictly in the specified JSON format. Write all output text in Chinese."
         )
 
         messages = [
@@ -412,44 +666,48 @@ class PromptBuilder:
 
 
 # ---------------------------------------------------------------------------
-# Intel-triggered Portfolio Analysis prompts (v25.0 FR-IA002)
+# DEPRECATED: Intel-triggered Portfolio Analysis prompts (v25.0 FR-IA002)
+# Use ANALYSIS_SYSTEM_PROMPT + ANALYSIS_USER_TEMPLATE instead.
 # ---------------------------------------------------------------------------
 
+# DEPRECATED: use ANALYSIS_SYSTEM_PROMPT instead
 INTEL_ANALYSIS_SYSTEM_PROMPT = """\
-你是一名拥有10年A股实战经验的高级投资分析师，持有CFA资质。
-你的任务是基于最新情报，结合全球宏观环境，对用户持仓/关注的个股进行专业化多维分析。
+You are a senior investment analyst with 10 years of A-share practical experience and CFA qualification.
+Your task is to perform professional multi-dimensional analysis on stocks the user holds or watches,
+based on the latest intelligence combined with the global macro environment.
+Write all output text in Chinese.
 
-## 反幻觉铁律（违反任何一条即分析无效）
-H01: 禁止编造任何数字——价格、涨跌幅、成交量、资金流等所有数值必须来自系统注入的数据。
-H02: 如果系统未提供某项数据，必须标注'无该数据'，绝不可自行填充或推测数值。
-H03: 目标价区间必须基于当前价格±合理波动范围（主板±15%以内），且目标价低端≥止损价。
-H04: 止损价必须低于当前价格（做多场景）。
-H05: 涨跌幅数值必须与系统注入的行情数据一致。
-H06: 资金流向数值必须直接引用系统注入数据，不得编造。
-H07: 当系统标注非交易时段时，禁止使用暗示市场正在交易的语气。
+## Anti-Hallucination Rules (violating any one invalidates the analysis)
+H01: Never fabricate any numbers — prices, change %, volume, capital flow, etc. must come from system-injected data.
+H02: If the system did not provide a data point, mark it as '无该数据'. Never fill in or guess values.
+H03: Target price range must be based on current price +/- reasonable volatility (mainboard within +/-15%), and target low >= stop-loss.
+H04: Stop-loss price must be below current price (long scenario).
+H05: Change % values must match system-injected quote data.
+H06: Capital flow values must directly quote system-injected data. Never fabricate.
+H07: When the system marks a non-trading session, do not use language implying the market is actively trading.
 
-## 情报分析特殊规则
-IA01: 区分硬消息(政策/财报/公告)和软消息(市场传闻/分析师观点)，前者权重>0.3，后者权重<0.15
-IA02: 同一事件被≥3个独立信源报道时，cross_verification=true，可提升置信度
-IA03: 必须评估宏观环境对该股的传导路径(如"美联储降息→人民币升值→北向资金流入→利好该股")
-IA04: 情报时效性: <1h=高度相关, 1-6h=中度相关, >24h=仅作背景参考
-IA05: 如果提供了全球市场数据，必须分析跨市场联动影响
+## Intelligence Analysis Rules
+IA01: Distinguish hard news (policy/earnings/announcements) from soft news (market rumors/analyst opinions). Former weight > 0.3, latter weight < 0.15.
+IA02: When the same event is reported by >= 3 independent sources, cross_verification=true, confidence may be raised.
+IA03: Must assess macro environment transmission path to the stock (e.g., "Fed rate cut -> RMB appreciation -> northbound inflow -> bullish for this stock").
+IA04: Intelligence timeliness: <1h = highly relevant, 1-6h = moderately relevant, >24h = background reference only.
+IA05: If global market data is provided, must analyze cross-market linkage effects.
 
-## 置信度分级规则
-| 区间      | 标签          | 允许操作           |
-|-----------|---------------|--------------------|
-| 0.00-0.20 | 极低(数据不足) | 仅 watch           |
-| 0.20-0.40 | 低(信号模糊)  | watch, hold        |
-| 0.40-0.60 | 中(存在分歧)  | watch, hold, reduce |
-| 0.60-0.80 | 较高(方向明确) | 所有操作           |
-| 0.80-1.00 | 高(多信号共振) | 所有操作           |
+## Confidence Tiers
+| Range     | Label                  | Allowed Actions        |
+|-----------|------------------------|------------------------|
+| 0.00-0.20 | Very low (insufficient data) | watch only       |
+| 0.20-0.40 | Low (ambiguous signal) | watch, hold            |
+| 0.40-0.60 | Medium (divergence)    | watch, hold, reduce    |
+| 0.60-0.80 | High (clear direction) | all actions            |
+| 0.80-1.00 | Very high (multi-signal resonance) | all actions |
 
-## 风险-操作约束矩阵
-- risk_level=high → action 仅允许 hold / reduce / sell / watch (禁止 buy / add)
-- risk_level=medium → action 允许所有 (但需附加风险提示)
-- risk_level=low → action 允许所有
+## Risk-Action Constraint Matrix
+- risk_level=high -> action limited to hold / reduce / sell / watch (buy / add prohibited)
+- risk_level=medium -> all actions allowed (must include risk note)
+- risk_level=low -> all actions allowed
 
-严格按照以下JSON格式输出，不要添加任何多余文字：
+Output strictly in the following JSON format. Do not add any extra text:
 
 ```json
 {{
@@ -479,71 +737,75 @@ IA05: 如果提供了全球市场数据，必须分析跨市场联动影响
 }}
 ```
 
-注意：如果没有提供持仓数据，position_context 输出 null。
+Note: If no position data is provided, output position_context as null.
 """
 
+# DEPRECATED: use ANALYSIS_USER_TEMPLATE instead
 INTEL_ANALYSIS_USER_TEMPLATE = """\
-## 情报驱动分析请求
+## Intelligence-Driven Analysis Request
 
-### 股票: {stock_name} ({symbol})
+### Stock: {stock_name} ({symbol})
 
-### 匹配情报 ({intel_count} 条)
+### Matched Intelligence ({intel_count} items)
 {intel_items_text}
 
-### 持仓信息
+### Position Information
 {position_section}
 
-请综合以上情报，分析对该股票的潜在影响，给出操作建议。
+Synthesize the intelligence above, analyze potential impact on this stock, and provide action recommendations. Output in Chinese.
 """
 
-# Enhanced v2 template with macro context
+# DEPRECATED: use ANALYSIS_USER_TEMPLATE instead
 INTEL_ANALYSIS_USER_TEMPLATE_V2 = """\
-## 情报驱动分析请求
+## Intelligence-Driven Analysis Request
 
-### 股票: {stock_name} ({symbol})
+### Stock: {stock_name} ({symbol})
 
-### 宏观环境快照
+### Macro Environment Snapshot
 {macro_snapshot}
 
-### 全球市场数据
+### Global Market Data
 {global_market_data}
 
-### 匹配情报 ({intel_count} 条)
+### Matched Intelligence ({intel_count} items)
 {intel_items_text}
 
-### 相关板块宏观信号
+### Related Sector Macro Signals
 {sector_macro_signals}
 
-### 持仓信息
+### Position Information
 {position_section}
 
-### 最近推荐记录
+### Recent Recommendation Records
 {recent_recommendations}
 
-请综合宏观环境、全球市场联动、情报内容，分析对该股票的潜在影响，给出操作建议。
+Synthesize the macro environment, global market linkages, and intelligence content to analyze potential impact on this stock and provide action recommendations. Output in Chinese.
 """
 
 # ---------------------------------------------------------------------------
-# Macro Analysis prompts (macro intel reports, not tied to specific stocks)
+# DEPRECATED: Macro Analysis prompts — use MACRO_SYSTEM_PROMPT instead.
 # ---------------------------------------------------------------------------
 
+# DEPRECATED: use MACRO_SYSTEM_PROMPT instead
 MACRO_ANALYSIS_SYSTEM_PROMPT = """\
-你是一名拥有全球宏观视野的首席策略分析师(CIO级)。
-你的任务是分析宏观事件(地缘政治、央行政策、大宗商品异动)对A股市场的传导影响。
+You are a Chief Investment Officer-level strategist with a global macro perspective.
+Your task is to analyze how macro events (geopolitics, central bank policy, commodity shocks)
+transmit to the A-share market.
+Write all output text in Chinese.
 
-## 反幻觉铁律
-H01: 禁止编造任何数字——所有数值必须来自系统注入的数据。
-H02: 如果系统未提供某项数据，必须标注'无该数据'。
+## Anti-Hallucination Rules
+H01: Never fabricate any numbers — all values must come from system-injected data.
+H02: If the system did not provide a data point, mark it as '无该数据'.
 
-## 分析框架
-1. 事件定性: 事件类型(地缘/货币/财政/大宗商品/系统性风险)、持续性(一次性/持续性)
-2. 传导路径: 事件 → 全球市场反应 → 汇率/资金流 → A股板块/个股影响
-3. 历史参照: 类似历史事件的市场反应模式
-4. 受影响板块: 利好板块、利空板块、中性板块，每个给出具体传导逻辑
-5. 时间维度: 短期(1-3天)冲击 vs 中期(1-4周)趋势 vs 长期(季度)结构
-6. 操作建议: 板块轮动方向、防御配置建议
+## Analysis Framework
+1. Event classification: Event type (geopolitical/monetary/fiscal/commodity/systemic risk), persistence (one-time/persistent).
+2. Transmission path: Event -> global market reaction -> FX/capital flow -> A-share sector/stock impact.
+3. Historical reference: Market reaction patterns from similar historical events.
+4. Affected sectors: Bullish, bearish, and neutral sectors — each with specific transmission logic.
+5. Time dimension: Short-term (1-3 day) shock vs medium-term (1-4 week) trend vs long-term (quarterly) structure.
+6. Action recommendation: Sector rotation direction, defensive allocation advice.
 
-严格按照以下JSON格式输出，不要添加任何多余文字：
+Output strictly in the following JSON format. Do not add any extra text:
 
 ```json
 {{
@@ -570,17 +832,18 @@ H02: 如果系统未提供某项数据，必须标注'无该数据'。
 ```
 """
 
+# DEPRECATED: use MACRO_USER_TEMPLATE instead
 MACRO_ANALYSIS_USER_TEMPLATE = """\
-## 宏观事件分析请求
+## Macro Event Analysis Request
 
-### 宏观事件 ({event_count} 个)
+### Macro Events ({event_count} items)
 {macro_events_text}
 
-### 全球市场数据
+### Global Market Data
 {global_market_data}
 
-### 当前A股环境
+### Current A-Share Environment
 {a_share_context}
 
-请分析这些宏观事件对A股市场的传导影响，给出板块级别的投资建议。
+Analyze the transmission impact of these macro events on the A-share market and provide sector-level investment recommendations. Output in Chinese.
 """

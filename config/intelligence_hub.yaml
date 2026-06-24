@@ -246,9 +246,9 @@ sources:
     display_name: "36氪"
     feed_url: "https://36kr.com/feed"
     default_category: industry
-    max_items: 20
+    max_items: 8             # Reduced from 20 — mostly generic tech/startup, low A-share relevance
     layer: L4
-    base_weight: 0.55
+    base_weight: 0.45        # Lowered from 0.55 — penalize non-financial content
     compliance_level: LOW
     domain_tags: [china, technology, industry]
 
@@ -258,9 +258,9 @@ sources:
     display_name: "虎嗅"
     feed_url: "https://www.huxiu.com/rss/0.xml"
     default_category: industry
-    max_items: 15
+    max_items: 8             # Reduced from 15
     layer: L4
-    base_weight: 0.55
+    base_weight: 0.45        # Lowered from 0.55
     compliance_level: LOW
     domain_tags: [china, technology, industry]
 

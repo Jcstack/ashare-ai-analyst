@@ -18,7 +18,6 @@ from src.discord_bot.embeds.intel_card import (
 from src.discord_bot.embeds.market_card import build_market_embed
 from src.discord_bot.embeds.portfolio_card import build_portfolio_embed
 from src.discord_bot.embeds.quote_card import build_quote_embed
-from src.discord_bot.embeds.recommendation_card import build_recommendation_embed
 from src.discord_bot.embeds.risk_card import build_risk_embed
 from src.discord_bot.embeds.sentiment_card import (
     build_pulse_embed,
@@ -152,20 +151,6 @@ class TestMarketCard:
     def test_empty_indices(self):
         embed = build_market_embed([])
         assert "暂不可用" in (embed.description or "")
-
-
-# ── recommendation_card ───────────────────────────────────────────
-
-
-class TestRecommendationCard:
-    def test_with_recommendations(self):
-        recs = [{"symbol": "600519", "name": "茅台", "score": 85.0, "confidence": 0.8}]
-        embed = build_recommendation_embed(recs)
-        assert len(embed.fields) == 1
-
-    def test_empty_recommendations(self):
-        embed = build_recommendation_embed([])
-        assert "无推荐" in (embed.description or "")
 
 
 # ── capital_flow_card ─────────────────────────────────────────────
@@ -413,32 +398,6 @@ class TestStockEmbedLongContent:
             assert len(field.value) <= 1024
 
 
-class TestRecommendationReasoningLength:
-    def test_reasoning_200_chars(self):
-        reasoning = "A" * 250
-        recs = [
-            {
-                "symbol": "600519",
-                "name": "贵州茅台",
-                "score": 85,
-                "confidence": "high",
-                "reasoning": reasoning,
-            }
-        ]
-        embed = build_recommendation_embed(recs)
-        field = embed.fields[0]
-        assert "A" * 200 in field.value
-        assert "A" * 201 not in field.value
-
-    def test_shows_up_to_12(self):
-        recs = [
-            {"symbol": f"{600000 + i}", "name": f"stock_{i}", "score": 80 - i}
-            for i in range(15)
-        ]
-        embed = build_recommendation_embed(recs)
-        assert len(embed.fields) == 12
-
-
 class TestReportFactorsUpTo8:
     def test_factors_up_to_8(self):
         report = {
@@ -620,11 +579,6 @@ class TestEmbedFieldLimits:
             "points": [f"p{i}" for i in range(20)],
         }
         embed = build_stock_embed(analysis, {"price": 100, "volume": 50000})
-        assert len(embed.fields) <= 25
-
-    def test_recommendation_fields_within_25(self):
-        recs = [{"symbol": f"{i}", "name": f"s{i}", "score": i} for i in range(20)]
-        embed = build_recommendation_embed(recs)
         assert len(embed.fields) <= 25
 
     def test_stock_field_values_within_1024(self):

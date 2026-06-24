@@ -36,15 +36,16 @@ _SECTOR_FLOW_COLUMN_MAP: dict[str, str] = {
 }
 
 # Period mapping: API parameter → AKShare indicator
+# AKShare ≥1.16.5 only supports {"今日", "5日", "10日"} — "3日" was removed.
 _PERIOD_MAP: dict[str, str] = {
     "today": "今日",
-    "3d": "3日",
+    "3d": "5日",  # "3日" removed upstream; fall back to 5日
     "5d": "5日",
     "10d": "10日",
 }
 
 # Period prefixes that AKShare prepends to column names
-_PERIOD_PREFIXES: tuple[str, ...] = ("今日", "3日", "5日", "10日")
+_PERIOD_PREFIXES: tuple[str, ...] = ("今日", "5日", "10日")
 
 
 def _strip_period_prefix(columns: list[str]) -> dict[str, str]:
@@ -102,7 +103,7 @@ class SectorFlowFetcher:
         industry-level capital flow data.
 
         Args:
-            period: One of "today", "3d", "5d", "10d".
+            period: One of "today", "3d" (→5d fallback), "5d", "10d".
 
         Returns:
             DataFrame with columns: sector_name, change_pct, net_inflow,
@@ -166,7 +167,7 @@ class SectorFlowFetcher:
         to retrieve concept-level capital flow data.
 
         Args:
-            period: One of "today", "3d", "5d", "10d".
+            period: One of "today", "3d" (→5d fallback), "5d", "10d".
 
         Returns:
             DataFrame with columns: sector_name, change_pct, net_inflow,

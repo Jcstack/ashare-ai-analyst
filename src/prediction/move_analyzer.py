@@ -19,29 +19,43 @@ from src.utils.market_hours import format_session_for_prompt, get_market_session
 logger = get_logger("prediction.move_analyzer")
 
 MOVE_ANALYSIS_SYSTEM_PROMPT = """\
-你是一名专业的A股智能投顾分析师。你的任务是解释一只股票**为什么涨或跌**（基于最近交易日数据），而不是预测未来走势。
+You are a professional A-share intelligent investment analyst. Your task is to \
+explain **why a stock rose or fell** (based on the most recent trading day data), \
+NOT to predict future price movements.
 
 {analysis_framework}
 
 {board_constraint}
 
-分析规则：
-1. 从大盘、板块、新闻/事件、技术面、资金面、量化策略信号等多个维度归因
-2. 每个因子给出 impact (positive/negative/neutral) 和 weight (0~1, 所有因子 weight 之和≈1.0)
-3. 如果提供了量化策略信号和贝叶斯分析，必须在归因中综合参考
-4. 如果提供了用户持仓数据，结合成本价给出个性化建议和关键价位
-5. 所有分析基于已发生的数据，禁止使用未来数据
-6. **禁止编造数字**：涨跌幅、价格、成交量、资金流等所有数值必须引用系统注入数据，不得凭空编写
-7. **key_levels（支撑/阻力位）**必须基于注入的技术指标（MA均线、布林带、前高/前低）推导，禁止凭空给出
-8. **注意市场时段**：
-   - 盘前/集合竞价：行情为昨日或竞价数据，分析应侧重消息面和盘前预期
-   - 盘中（上午/下午）：行情为实时但不完整，涨跌幅和成交量为截至当前值，后续可能变化
-   - 午间休市：行情仅反映上午交易，下午走势可能不同
-   - 收盘后：行情为全天最终数据，分析应基于完整日内数据进行全面归因
+Analysis rules:
+1. Attribute the move across multiple dimensions: broad market, sector, \
+news/events, technicals, capital flow, quantitative strategy signals, etc.
+2. For each factor, provide impact (positive/negative/neutral) and weight \
+(0~1, all factor weights should sum to approximately 1.0).
+3. If quantitative strategy signals and Bayesian analysis are provided, \
+you MUST incorporate them in the attribution.
+4. If user position data is provided, give personalized advice and key price \
+levels based on cost basis.
+5. All analysis must be based on data that has already occurred — do NOT use \
+future data.
+6. **Do NOT fabricate numbers**: all values (change %, price, volume, capital \
+flow) MUST be cited from the system-injected data — never invent figures.
+7. **key_levels (support/resistance)** MUST be derived from injected technical \
+indicators (MA, Bollinger Bands, prior highs/lows) — do NOT invent them.
+8. **Pay attention to market session**:
+   - Pre-market / call auction (集合竞价): quotes are from yesterday or auction \
+data; focus on news and pre-market expectations
+   - Intraday (morning/afternoon): quotes are real-time but incomplete; change % \
+and volume are as-of-now values that may change
+   - Midday break (午间休市): quotes reflect only morning trading; afternoon \
+trend may differ
+   - After close (收盘后): quotes are final full-day data; perform comprehensive \
+attribution based on complete intraday data
 
 {data_quality_section}
 
-严格按照以下JSON格式输出，不要添加任何多余文字：
+Write all output text in Chinese.
+Output STRICTLY in the following JSON format with no extra text:
 
 ```json
 {{
@@ -63,7 +77,7 @@ MOVE_ANALYSIS_SYSTEM_PROMPT = """\
 }}
 ```
 
-注意：如果没有提供持仓数据，position_context 输出 null。
+Note: if no position data is provided, output position_context as null.
 """
 
 MOVE_ANALYSIS_USER_TEMPLATE = """\
@@ -108,7 +122,10 @@ MOVE_ANALYSIS_USER_TEMPLATE = """\
 
 {position_section}
 
-请根据当前市场时段，分析该股票涨跌的原因（非交易时段请基于最近交易日数据），特别注意板块/概念联动效应和板块资金流方向，按因子权重从高到低排列。
+Based on the current market session, analyze the reasons for this stock's price \
+movement (during non-trading hours, use the most recent trading day data). Pay \
+special attention to sector/concept linkage effects and sector capital flow \
+direction. Rank factors by weight from high to low.
 """
 
 
@@ -205,7 +222,7 @@ class MoveAnalyzer:
                 f"- 成本价: {position.get('cost_price', '未知')}\n"
                 f"- 持仓数量: {position.get('shares', '未知')}股\n"
                 f"- 持仓天数: {position.get('holding_days', '未知')}天\n"
-                "\n请结合持仓成本给出个性化建议和关键价位。"
+                "\nProvide personalized advice and key price levels based on the position cost basis."
             )
         else:
             position_section = "（无持仓数据，position_context 输出 null）"
@@ -268,7 +285,7 @@ class MoveAnalyzer:
             )
             result = self._parse_response(response.text, symbol, name, quote, position)
             result["model_used"] = response.model
-            result["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            result["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S+08:00")
             result["market_session"] = session["label"]
             self._set_cached(cache_key, result)
             return result

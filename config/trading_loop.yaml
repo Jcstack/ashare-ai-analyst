@@ -6,16 +6,61 @@ trading_loop:
   postmarket_time: "15:30"
   overnight_time: "20:00"
 
-  # Decision thresholds
-  min_confidence_to_propose: 0.6
-  min_confidence_to_recommend_buy: 0.7
+  # Decision thresholds (raised for ultra-short-term: posterior >= 0.7 to trade)
+  min_confidence_to_propose: 0.65
+  min_confidence_to_recommend_buy: 0.70
 
-  # Safety guardrails
-  max_daily_loss_pct: 0.03
-  max_position_pct: 0.30
-  max_sector_pct: 0.40
+  # Market emotion hard gates (sentiment_cycle phases → trading mode)
+  # Phases: freezing(冰点) | ignition(启动/修复) | acceleration(加速/主升) | climax(高潮/分歧) | ebb(退潮)
+  emotion_gates:
+    ebb: "no_trade"            # 退潮: force no trading, clear positions
+    freezing: "small_position" # 冰点: max 10% total position
+    ignition: "normal"         # 启动/修复: normal trading
+    climax: "cautious"         # 高潮/分歧: reduced position, tighter stops
+    acceleration: "aggressive" # 加速/主升: full position allowed
+
+  # Conviction-based gate modes (情绪周期 → 仓位上限)
+  # Philosophy: Druckenmiller — "when you have conviction, go for the jugular"
+  # 赵老哥 — "五成仓常规，龙头强势可重仓，越不顺越控制仓位"
+  gate_modes:
+    no_trade:
+      max_position_pct: 0.0
+      max_single_stock_pct: 0.0
+      stop_loss_multiplier: 0.5    # tighten existing stops by 50%
+      allow_new_buys: false
+      force_clear: true
+    small_position:              # 冰点: market frozen, minimal exposure
+      max_position_pct: 0.30
+      max_single_stock_pct: 0.20
+      stop_loss_multiplier: 0.7
+      allow_new_buys: true
+      force_clear: false
+    normal:                      # 启动: normal conviction → decent position
+      max_position_pct: 0.80
+      max_single_stock_pct: 0.50
+      stop_loss_multiplier: 1.0
+      allow_new_buys: true
+      force_clear: false
+    cautious:                    # 高潮/分歧: market euphoric, pull back
+      max_position_pct: 0.50
+      max_single_stock_pct: 0.30
+      stop_loss_multiplier: 0.8
+      allow_new_buys: true
+      force_clear: false
+    aggressive:                  # 加速/主升: full conviction, full position
+      max_position_pct: 1.0
+      max_single_stock_pct: 1.0
+      stop_loss_multiplier: 1.0
+      allow_new_buys: true
+      force_clear: false
+
+  # Survival guardrails (these stay — even Soros has risk limits)
+  max_daily_loss_pct: 0.05       # -5% daily → halt (raised from 3%)
+  max_loss_per_trade_pct: 0.08   # -8% per trade hard stop (raised from 3%)
   consecutive_loss_threshold: 3
+  consecutive_loss_stop: 3        # 3 consecutive losses → pause, not permanent stop
   consecutive_loss_size_factor: 0.5
+  ebb_force_clear: true           # 退潮 still forces clear (this is non-negotiable)
 
   # Debate config
   debate_rounds_normal: 3
@@ -40,6 +85,10 @@ trading_loop:
   min_order_value: 1000
   max_days_to_exit: 3
   near_limit_threshold_pct: 0.08
+
+  # UST 门控管线
+  bayesian_prescreen_threshold: 0.65
+  leader_scan_enabled: true
 
   # Signal aggregator
   signal_dedup_window_hours: 1

@@ -32,8 +32,22 @@ class AlphaFactors:
 
     @property
     def momentum_score(self) -> float:
-        """Aggregate momentum score (average of momentum factors, 0-1)."""
-        keys = [k for k in self.factors if k.startswith("momentum_")]
+        """Aggregate momentum score (average of momentum + roc factors, 0-1)."""
+        keys = [
+            k for k in self.factors if k.startswith("momentum_") or k.startswith("roc_")
+        ]
+        if not keys:
+            return 0.5
+        return sum(self.factors[k] for k in keys) / len(keys)
+
+    @property
+    def reversal_score(self) -> float:
+        """Aggregate reversal/mean-reversion score."""
+        keys = [
+            k
+            for k in self.factors
+            if k.startswith("mean_reversion_") or k == "high_low_ratio_20d"
+        ]
         if not keys:
             return 0.5
         return sum(self.factors[k] for k in keys) / len(keys)
@@ -41,7 +55,9 @@ class AlphaFactors:
     @property
     def volatility_score(self) -> float:
         """Aggregate volatility (lower is better for screening)."""
-        keys = [k for k in self.factors if k.startswith("volatility_")]
+        keys = [
+            k for k in self.factors if k.startswith("volatility_") or k == "atr_14d"
+        ]
         if not keys:
             return 0.5
         raw = sum(self.factors[k] for k in keys) / len(keys)
@@ -49,11 +65,41 @@ class AlphaFactors:
 
     @property
     def liquidity_score(self) -> float:
-        """Liquidity score (higher is better)."""
-        tr = self.factors.get("turnover_ratio")
-        if tr is None:
+        """Liquidity score from turnover, volume MA ratio, OBV, VWAP."""
+        keys = [
+            k
+            for k in self.factors
+            if k
+            in (
+                "turnover_ratio",
+                "volume_ma_ratio_5_20",
+                "obv_slope",
+                "vwap_deviation",
+            )
+        ]
+        if not keys:
             return 0.5
-        return max(0.0, min(1.0, tr))
+        return max(0.0, min(1.0, sum(self.factors[k] for k in keys) / len(keys)))
+
+    @property
+    def price_pattern_score(self) -> float:
+        """Price pattern score from MA deviations."""
+        keys = [k for k in self.factors if k.startswith("price_to_ma")]
+        if not keys:
+            return 0.5
+        return sum(self.factors[k] for k in keys) / len(keys)
+
+    @property
+    def quality_score(self) -> float:
+        """Quality/strength score from RSI, shadow ratio, and derived quality."""
+        keys = [
+            k
+            for k in self.factors
+            if k in ("rsi_14", "upper_shadow_ratio", "quality_score")
+        ]
+        if not keys:
+            return 0.5
+        return sum(self.factors[k] for k in keys) / len(keys)
 
     @property
     def composite_score(self) -> float:
@@ -61,16 +107,20 @@ class AlphaFactors:
         if not self.available:
             return 0.5
         weights = {
-            "momentum": 0.35,
-            "volatility": 0.25,
-            "liquidity": 0.20,
+            "momentum": 0.25,
+            "reversal": 0.10,
+            "volatility": 0.15,
+            "liquidity": 0.15,
+            "price_pattern": 0.15,
             "quality": 0.20,
         }
         scores = {
             "momentum": self.momentum_score,
+            "reversal": self.reversal_score,
             "volatility": self.volatility_score,
             "liquidity": self.liquidity_score,
-            "quality": self.factors.get("quality_score", 0.5),
+            "price_pattern": self.price_pattern_score,
+            "quality": self.quality_score,
         }
         return round(
             sum(weights[k] * scores[k] for k in weights),
@@ -83,8 +133,11 @@ class AlphaFactors:
             "factors": self.factors,
             "available": self.available,
             "momentum_score": round(self.momentum_score, 4),
+            "reversal_score": round(self.reversal_score, 4),
             "volatility_score": round(self.volatility_score, 4),
             "liquidity_score": round(self.liquidity_score, 4),
+            "price_pattern_score": round(self.price_pattern_score, 4),
+            "quality_score": round(self.quality_score, 4),
             "composite_score": self.composite_score,
         }
 
@@ -132,18 +185,36 @@ class QlibAlphaEngine:
 
         normalized: dict[str, float] = {}
         for name, val in raw.items():
-            if name.startswith("momentum_"):
-                # Momentum: center at 0, scale by 10
+            if name.startswith("momentum_") or name.startswith("roc_"):
+                # Momentum/ROC: center at 0, scale by 10
                 normalized[name] = round(1.0 / (1.0 + math.exp(-val * 10)), 4)
-            elif name.startswith("volatility_"):
+            elif name.startswith("mean_reversion_"):
+                # Mean reversion: positive = below MA (buy signal), sigmoid
+                normalized[name] = round(1.0 / (1.0 + math.exp(-val * 10)), 4)
+            elif name == "high_low_ratio_20d":
+                # Range ratio: higher = more volatile, sigmoid centered at 0.03
+                normalized[name] = round(1.0 / (1.0 + math.exp(-(val - 0.03) * 30)), 4)
+            elif name.startswith("volatility_") or name == "atr_14d":
                 # Volatility: raw is coefficient of variation, keep in [0, 1]
                 normalized[name] = round(max(0.0, min(1.0, val)), 4)
-            elif name == "turnover_ratio":
-                # Turnover: sigmoid centered at 1.0
+            elif name in ("turnover_ratio", "volume_ma_ratio_5_20"):
+                # Turnover/volume ratios: sigmoid centered at 1.0
                 normalized[name] = round(1.0 / (1.0 + math.exp(-(val - 1.0))), 4)
-            elif name == "price_to_ma20":
+            elif name == "obv_slope":
+                # OBV slope: [-1, 1] range, sigmoid
+                normalized[name] = round(1.0 / (1.0 + math.exp(-val * 3)), 4)
+            elif name == "vwap_deviation":
+                # VWAP deviation: center at 0
+                normalized[name] = round(1.0 / (1.0 + math.exp(-val * 10)), 4)
+            elif name.startswith("price_to_ma"):
                 # Price relative to MA: center at 0
                 normalized[name] = round(1.0 / (1.0 + math.exp(-val * 10)), 4)
+            elif name == "rsi_14":
+                # RSI: already 0-100, normalize to 0-1
+                normalized[name] = round(max(0.0, min(1.0, val / 100.0)), 4)
+            elif name == "upper_shadow_ratio":
+                # Upper shadow: 0-1 range, invert (less shadow = better)
+                normalized[name] = round(max(0.0, min(1.0, 1.0 - val)), 4)
             else:
                 normalized[name] = round(max(0.0, min(1.0, val)), 4)
 

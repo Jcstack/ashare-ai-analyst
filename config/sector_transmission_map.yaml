@@ -1,0 +1,119 @@
+# Sector Transmission Map — Overnight global market → A-share sector impact
+# sensitivity: 0-1.0, how much A-share sector moves per 1% foreign index move
+# direction: positive (same direction) or negative (inverse)
+# Used by get_overnight_transmission tool
+
+us_equity:
+  nasdaq:
+    半导体:
+      sensitivity: 0.85
+      direction: positive
+      us_peers: [NVDA, TSM, ASML, AMD]
+      a_share_examples: [韦尔股份, 北方华创, 中芯国际]
+    消费电子:
+      sensitivity: 0.75
+      direction: positive
+      us_peers: [AAPL, QCOM]
+      a_share_examples: [立讯精密, 歌尔股份, 蓝思科技]
+    AI算力:
+      sensitivity: 0.80
+      direction: positive
+      us_peers: [NVDA, MSFT, GOOG]
+      a_share_examples: [中际旭创, 天孚通信, 新易盛]
+    软件信息:
+      sensitivity: 0.60
+      direction: positive
+      us_peers: [MSFT, CRM, ORCL]
+    新能源车:
+      sensitivity: 0.65
+      direction: positive
+      us_peers: [TSLA]
+      a_share_examples: [宁德时代, 比亚迪]
+
+  sp500:
+    大消费:
+      sensitivity: 0.45
+      direction: positive
+    金融:
+      sensitivity: 0.55
+      direction: positive
+    医药:
+      sensitivity: 0.40
+      direction: positive
+      us_peers: [LLY, JNJ, PFE]
+
+  dowjones:
+    基建工程:
+      sensitivity: 0.40
+      direction: positive
+    机械设备:
+      sensitivity: 0.45
+      direction: positive
+
+commodity:
+  原油:
+    石油开采:
+      sensitivity: 0.90
+      direction: positive
+    油运:
+      sensitivity: 0.70
+      direction: positive
+    化工:
+      sensitivity: 0.60
+      direction: positive
+    航空:
+      sensitivity: 0.50
+      direction: negative  # 油涨→航空成本↑→承压
+    消费:
+      sensitivity: 0.35
+      direction: negative  # 油涨→成本↑→消费承压
+
+  黄金:
+    贵金属:
+      sensitivity: 0.90
+      direction: positive
+    银行:
+      sensitivity: 0.30
+      direction: negative  # 金涨=避险=不利银行
+
+  铜:
+    有色金属:
+      sensitivity: 0.80
+      direction: positive
+    新能源:
+      sensitivity: 0.45
+      direction: positive  # 铜是新能源关键材料
+
+currency:
+  美元指数:
+    出口:
+      sensitivity: 0.40
+      direction: negative  # 美元涨→人民币贬→出口竞争力↑ (出口企业受益)
+    进口:
+      sensitivity: 0.35
+      direction: positive  # 美元涨→进口成本↑→承压
+    北向关联:
+      sensitivity: 0.50
+      direction: negative  # 美元涨→外资流出预期
+
+# Composite scenarios
+scenarios:
+  risk_on:  # 美股涨+油跌+美元弱
+    description: 风险偏好回升
+    beneficiaries: [半导体, 消费电子, AI算力, 大消费]
+    pressured: [贵金属, 公用事业]
+
+  risk_off:  # 美股跌+金涨+美元强
+    description: 避险模式
+    beneficiaries: [贵金属, 军工, 公用事业]
+    pressured: [半导体, 消费电子, 新能源车]
+
+  stagflation:  # 美股跌+油涨+金涨
+    description: 滞胀恐慌
+    beneficiaries: [贵金属, 石油开采]
+    pressured: [全部成长股, 消费, 金融]
+
+  goldilocks:  # 美股涨+油稳+美元稳
+    description: 金发姑娘经济
+    beneficiaries: [全市场均衡]
+    pressured: []

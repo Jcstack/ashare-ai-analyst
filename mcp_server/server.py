@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from mcp_server.api_client import ApiError, get
+from mcp_server.api_client import ApiError, get, post
 
 mcp = FastMCP(
     "ashare-research",
@@ -42,7 +42,7 @@ async def get_comprehensive_analysis(symbol: str) -> str:
         symbol: 6-digit A-share stock code (e.g. "600519").
     """
     try:
-        data = await get(f"/stock/{symbol}/comprehensive-analysis")
+        data = await get(f"/stock/{symbol}/comprehensive-analysis", timeout=60)
         return _format_json(data)
     except Exception as exc:
         return _error_result(exc)
@@ -62,7 +62,7 @@ async def get_bayesian_analysis(symbol: str) -> str:
         symbol: 6-digit A-share stock code (e.g. "600519").
     """
     try:
-        data = await get(f"/stock/{symbol}/indicators/bayesian")
+        data = await get(f"/stock/{symbol}/indicators/bayesian", timeout=30)
         return _format_json(data)
     except Exception as exc:
         return _error_result(exc)
@@ -108,24 +108,7 @@ async def get_fund_flow(symbol: str) -> str:
         return _error_result(exc)
 
 
-# ── Tool 5: Recommendations ────────────────────────────────────
-
-
-@mcp.tool()
-async def get_recommendations() -> str:
-    """获取智能推荐列表 — 今日推荐股票及评分。
-
-    Returns today's stock recommendations with scores,
-    investment style tags, and review summaries.
-    """
-    try:
-        data = await get("/recommendations/today")
-        return _format_json(data)
-    except Exception as exc:
-        return _error_result(exc)
-
-
-# ── Tool 6: Market Overview ────────────────────────────────────
+# ── Tool 5: Market Overview ─────────────────────────────────────
 
 
 @mcp.tool()
@@ -136,7 +119,7 @@ async def get_market_overview() -> str:
     sector rotation, and an AI-generated market summary.
     """
     try:
-        data = await get("/market/ai-overview")
+        data = await get("/market/ai-overview", timeout=30)
         return _format_json(data)
     except Exception as exc:
         return _error_result(exc)
@@ -177,6 +160,138 @@ async def get_data_health() -> str:
         return _format_json(data)
     except Exception as exc:
         return _error_result(exc)
+
+
+# ── Tool 9: Portfolio / Positions ─────────────────────────────
+
+
+@mcp.tool()
+async def get_portfolio() -> str:
+    """获取当前持仓组合 — 所有持仓股票及成本/数量/实时盈亏。
+
+    Returns the user's current portfolio enriched with realtime prices:
+    positions with symbol, name, costPrice, shares, buyDate, currentPrice,
+    todayChange, marketValue, pnl (盈亏金额), pnlPercent (盈亏百分比).
+    Also includes portfolio totals: total_cost, total_market_value,
+    total_pnl, total_pnl_percent.
+    """
+    try:
+        data = await get("/portfolio/enriched", timeout=15)
+        return _format_json(data)
+    except Exception:
+        # Fallback to basic portfolio if enriched endpoint unavailable
+        try:
+            data = await get("/portfolio")
+            return _format_json(data)
+        except Exception as exc:
+            return _error_result(exc)
+
+
+# ── Tool 10: Intraday Patterns ────────────────────────────────
+
+
+@mcp.tool()
+async def get_intraday_patterns(symbol: str) -> str:
+    """获取个股盘中异动模式 — 冲高回落/尾盘拉升/量价背离等8种模式检测结果。
+
+    Returns detected intraday patterns for a stock: high_reversal,
+    gap_down_rally, late_rally, late_dump, volume_price_divergence,
+    vwap_rejection, volume_dry_up, opening_drive.
+
+    Args:
+        symbol: 6-digit A-share stock code (e.g. "600519").
+    """
+    try:
+        data = await get(f"/stock/{symbol}/intraday-patterns")
+        return _format_json(data)
+    except Exception as exc:
+        return _error_result(exc)
+
+
+# ── Tool 11: Minute Bars ─────────────────────────────────────
+
+
+@mcp.tool()
+async def get_minute_bars(symbol: str) -> str:
+    """获取个股分钟级K线数据 — 5分钟OHLCV用于分时分析。
+
+    Returns today's 5-minute OHLCV bars for intraday analysis:
+    datetime, open, high, low, close, volume, amount.
+
+    Args:
+        symbol: 6-digit A-share stock code (e.g. "600519").
+    """
+    try:
+        data = await get(f"/stock/{symbol}/minute-bars")
+        return _format_json(data)
+    except Exception as exc:
+        return _error_result(exc)
+
+
+# ── Tool 12: Intraday Overview ───────────────────────────────
+
+
+@mcp.tool()
+async def get_intraday_overview() -> str:
+    """获取盘中全市场异动概览 — 模式统计、持仓股告警。
+
+    Returns market-wide intraday pattern summary: pattern type counts,
+    average severity, and high-severity alerts for portfolio stocks.
+    """
+    try:
+        data = await get("/market/intraday-overview")
+        return _format_json(data)
+    except Exception as exc:
+        return _error_result(exc)
+
+
+# ── Tool 13: Push Message to User ───────────────────────────────
+
+
+@mcp.tool()
+async def push_message_to_user(
+    title: str,
+    summary: str,
+    msg_type: str = "market_insight",
+    symbol: str = "",
+    action_advice: str = "",
+    risk_note: str = "",
+    priority: str = "high",
+    confidence: float = 0.5,
+) -> str:
+    """推送消息给用户 — 通过Discord和消息中心通知用户。
+
+    当你有重要发现需要立即通知用户时使用此工具。
+    消息将同时出现在Discord和Web消息中心。
+
+    Args:
+        title: 消息标题（简短中文）
+        summary: 消息内容（用大白话，2-3句话）
+        msg_type: 消息类型 (buy_signal/sell_signal/risk_alert/hold_update/market_insight)
+        symbol: 相关股票代码（可选）
+        action_advice: 具体操作建议（可选）
+        risk_note: 风险提示（可选）
+        priority: 优先级 (critical/high/medium/low)
+        confidence: 信心值 0-1（可选）
+    """
+    try:
+        await post(
+            "/messages/push",
+            json={
+                "msg_type": msg_type,
+                "title": title,
+                "summary": summary,
+                "symbol": symbol or None,
+                "action_advice": action_advice or None,
+                "risk_note": risk_note or None,
+                "priority": priority,
+                "confidence": confidence,
+            },
+            timeout=10,
+        )
+        return f"消息已推送: {title}"
+    except Exception as exc:
+        return f"推送失败: {exc}"
 
 
 # ── Helpers ─────────────────────────────────────────────────────

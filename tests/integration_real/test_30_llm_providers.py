@@ -100,7 +100,7 @@ class TestAnthropicClaude:
         try:
             provider = AnthropicProvider(
                 api_key=os.environ["ANTHROPIC_API_KEY"],
-                default_model="claude-haiku-4-5",
+                default_model="claude-haiku-3-5",
             )
             with measure_time() as timing:
                 response = provider.complete(

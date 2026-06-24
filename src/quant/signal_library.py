@@ -108,6 +108,16 @@ class SignalLibrary:
                 },
             )
 
+        # Common abbreviation aliases (LLM often uses these)
+        self._aliases: dict[str, str] = {
+            "MA": "ma_cross",
+            "MACD": "macd_divergence",
+            "RSI": "rsi_extreme",
+            "KDJ": "rsi_extreme",  # closest equivalent
+            "BOLL": "bollinger_squeeze",
+            "VOL": "volume_breakout",
+        }
+
     def evaluate(
         self,
         closes: list[float] | pd.Series,
@@ -136,7 +146,9 @@ class SignalLibrary:
         results: list[SignalResult] = []
 
         for name in names:
-            defn = self.definitions.get(name)
+            # Resolve common abbreviations (MA → ma_cross, etc.)
+            resolved = self._aliases.get(name, name)
+            defn = self.definitions.get(resolved)
             if defn is None:
                 logger.warning("Unknown signal: %s", name)
                 continue

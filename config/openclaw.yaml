@@ -53,15 +53,15 @@ beat_schedule:
         day_of_week: "5"  # Friday only
     description: "每周汇总报告 (周五 18:00 CST)"
 
-  # v2.4 FR-NP001: Intraday sentiment scan (every 30min during trading hours)
+  # v2.4 FR-NP001: Intraday sentiment scan (offset +2min to avoid :00/:30 collision)
   sentiment_scan:
     task: "openclaw.tasks.sentiment_pipeline.task_sentiment_scan"
     schedule:
       crontab:
-        minute: "*/30"
+        minute: "2,32"
         hour: "9-15"
         day_of_week: "1-5"
-    description: "盘中舆情扫描 (交易时段每30分钟)"
+    description: "盘中舆情扫描 (交易时段 :02/:32, 避开整点LLM冲突)"
 
   # v2.4 FR-NP002: Market overview (midday + close)
   market_overview_midday:
@@ -158,15 +158,15 @@ beat_schedule:
         day_of_week: "1-5"
     description: "资金异动扫描 (交易时段每10分钟)"
 
-  # I-008: Intelligence hub auto-refresh (every 30 min, 07:00-23:00, all days)
+  # I-008: Intelligence hub auto-refresh (offset +10min to avoid LLM collision)
   intel_refresh:
     task: "openclaw.tasks.intel_refresh_pipeline.task_intel_refresh"
     schedule:
       crontab:
-        minute: "*/30"
+        minute: "10,40"
         hour: "7-23"
         day_of_week: "*"
-    description: "情报中心自动刷新 (每30分钟, 7-23时)"
+    description: "情报中心自动刷新 (:10/:40, 7-23时, 避开LLM冲突)"
 
   # v3.2 FR-GM001: Global market snapshot (every 15 min, 07:00-23:00, all days)
   global_market_snapshot:
@@ -178,44 +178,26 @@ beat_schedule:
         day_of_week: "*"
     description: "全球市场快照 (每15分钟, 7-23时, 含假期)"
 
-  # v28.0: Smart stock recommendation generation (every 10 min during trading hours)
-  recommendation_generate:
-    task: "openclaw.tasks.recommendation_pipeline.task_recommendation_generate"
-    schedule:
-      crontab:
-        minute: "*/10"
-        hour: "9-15"
-        day_of_week: "1-5"
-    description: "智能选股推荐生成 (交易时段每10分钟)"
-
-  # v28.0: Recommendation outcome backfill (daily at 16:45)
-  recommendation_backfill:
-    task: "openclaw.tasks.recommendation_backfill.task_recommendation_backfill"
-    schedule:
-      crontab:
-        hour: 16
-        minute: 45
-        day_of_week: "1-5"
-    description: "推荐结果回填 T+N 实际表现 (16:45 CST)"
+  # v28.0: recommendation_generate/backfill — REMOVED in v38.0 AI-first refactor
 
   # I-068: LLM result pre-warming (market overview + sentiment report every 30min, hot stocks pre-open)
   prewarm_market_overview:
     task: "openclaw.tasks.llm_prewarm_pipeline.task_prewarm_market_overview"
     schedule:
       crontab:
-        minute: "*/30"
+        minute: "8,38"
         hour: "9-16"
         day_of_week: "1-5"
-    description: "LLM大盘情绪预热 (交易时段每30分钟)"
+    description: "LLM大盘情绪预热 (:08/:38, 避开LLM冲突)"
 
   prewarm_sentiment_report:
     task: "openclaw.tasks.llm_prewarm_pipeline.task_prewarm_sentiment_report"
     schedule:
       crontab:
-        minute: "*/30"
+        minute: "12,42"
         hour: "9-16"
         day_of_week: "1-5"
-    description: "LLM舆情日报预热 (交易时段每30分钟)"
+    description: "LLM舆情日报预热 (:12/:42, 避开LLM冲突)"
 
   prewarm_hot_stocks_preopen:
     task: "openclaw.tasks.llm_prewarm_pipeline.task_prewarm_hot_stocks"
@@ -296,35 +278,313 @@ beat_schedule:
         day_of_week: "1-5"
     description: "持仓净值快照 (收盘后15:05 CST)"
 
-  # v35.0: Autonomous Trading Loop — OODA cycle (every 15 min during trading)
-  trading_loop_cycle:
-    task: "openclaw.tasks.trading_loop.task_trading_loop_cycle"
+  # v38.0: Intraday Pipeline — minute bars, patterns, signals, sector flow
+  intraday_minute_bar_refresh:
+    task: "openclaw.tasks.intraday_pipeline.task_minute_bar_refresh"
+    schedule:
+      crontab:
+        minute: "*/5"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "分钟K线刷新 (交易时段每5分钟)"
+
+  intraday_pattern_scan:
+    task: "openclaw.tasks.intraday_pipeline.task_intraday_pattern_scan"
     schedule:
       crontab:
         minute: "*/15"
         hour: "9-15"
         day_of_week: "1-5"
-    description: "自主决策循环 (交易时段每15分钟)"
+    description: "盘中形态扫描: 8种A股模式 (交易时段每15分钟)"
 
-  # v35.0: Morning briefing (08:00 Mon-Fri)
-  trading_loop_premarket:
-    task: "openclaw.tasks.trading_loop.task_trading_loop_premarket"
+  intraday_advanced_signal_scan:
+    task: "openclaw.tasks.intraday_pipeline.task_advanced_signal_scan"
     schedule:
       crontab:
-        hour: 8
-        minute: 0
+        minute: "*/15"
+        hour: "9-15"
         day_of_week: "1-5"
-    description: "晨间简报 (08:00 CST)"
+    description: "高级信号扫描: VWAP/VPIN/反身性 (交易时段每15分钟)"
 
-  # v35.0: Evening review (15:30 Mon-Fri)
-  trading_loop_postmarket:
-    task: "openclaw.tasks.trading_loop.task_trading_loop_postmarket"
+  intraday_sector_flow:
+    task: "openclaw.tasks.intraday_pipeline.task_sector_flow_refresh"
+    schedule:
+      crontab:
+        minute: "*/10"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "板块资金流刷新 (交易时段每10分钟)"
+
+  # DISABLED: market_pulse spam (replaced by InvestorAgent)
+  # intraday_sector_pulse: REMOVED — was pushing "市场脉搏 HH:MM" every 30min
+
+  intraday_call_auction_capture:
+    task: "openclaw.tasks.intraday_pipeline.task_call_auction_capture"
+    schedule:
+      crontab:
+        minute: "15,16,17,18,19,20,21,22,23,24,25"
+        hour: 9
+        day_of_week: "1-5"
+    description: "集合竞价数据采集 (09:15-09:25每分钟)"
+
+  # DISABLED: quant_schedule tasks (replaced by InvestorAgent)
+  # quant_call_auction_phase1/2, quant_market_open_briefing, quant_late_session_decision: REMOVED
+
+  # Keep fast_scan for safety (stop-loss monitoring, no LLM)
+  trading_loop_fast_scan:
+    task: "openclaw.tasks.trading_loop.task_fast_scan"
+    schedule:
+      crontab:
+        minute: "3,18,33,48"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "UST快速扫描: 止损/龙头/情绪 (每15分钟, 无LLM)"
+
+  # DISABLED: old trading_loop_cycle + InvestmentDirector lifecycle (replaced by InvestorAgent)
+  # trading_loop_cycle, trading_loop_premarket, auction_monitor, morning_session,
+  # late_session, close_briefing, trading_loop_postmarket: ALL REMOVED
+
+  # ──────────────────────────────────────────────────────────────
+  # v53.0: InvestorAgent — Claude Code agent loop (LLM drives decisions)
+  # "The model is the agent. The code is the harness."
+  # ──────────────────────────────────────────────────────────────
+  # HeartbeatAgent: Autonomous investor loop (every 5 min)
+  # Runs parallel with legacy InvestorAgent sessions during migration.
+  # ──────────────────────────────────────────────────────────────
+
+  # DISABLED: replaced by always-on-agent daemon (v60.0 KAIROS architecture)
+  # agent_heartbeat:
+  #   task: "openclaw.tasks.heartbeat.task_agent_heartbeat"
+  #   schedule:
+  #     crontab:
+  #       minute: "0,10,20,30,40,50"
+  #       hour: "8-15"
+  #       day_of_week: "1-5"
+  #   description: "HeartbeatAgent: replaced by always-on-agent daemon"
+
+  # ──────────────────────────────────────────────────────────────
+  # Legacy InvestorAgent sessions (kept for parallel comparison)
+  # ──────────────────────────────────────────────────────────────
+
+  # DISABLED: HeartbeatAgent replaces InvestorAgent (v58.0)
+  # investor_agent_pre_market:
+  # task: "openclaw.tasks.investor_agent.task_pre_market"
+  # schedule:
+  # crontab:
+  # hour: 8
+  # minute: 0
+  # day_of_week: "1-5"
+  # description: "InvestorAgent: 盘前策略 (08:00)"
+
+  # DISABLED: HeartbeatAgent replaces InvestorAgent (v58.0)
+  # investor_agent_call_auction:
+  # task: "openclaw.tasks.investor_agent.task_call_auction"
+  # schedule:
+  # crontab:
+  # hour: 9
+  # minute: 15
+  # day_of_week: "1-5"
+  # description: "InvestorAgent: 集合竞价 (09:15)"
+
+  # DISABLED: HeartbeatAgent replaces InvestorAgent (v58.0)
+  # investor_agent_market_open:
+  # task: "openclaw.tasks.investor_agent.task_market_open"
+  # schedule:
+  # crontab:
+  # hour: 9
+  # minute: 32
+  # day_of_week: "1-5"
+  # description: "InvestorAgent: 开盘观察 (09:32)"
+
+  # DISABLED: HeartbeatAgent replaces InvestorAgent (v58.0)
+  # investor_agent_morning_check:
+  # task: "openclaw.tasks.investor_agent.task_morning_check"
+  # schedule:
+  # crontab:
+  # hour: 10
+  # minute: 30
+  # day_of_week: "1-5"
+  # description: "InvestorAgent: 早盘检查 (10:30)"
+
+  # DISABLED: HeartbeatAgent replaces InvestorAgent (v58.0)
+  # investor_agent_midday:
+  # task: "openclaw.tasks.investor_agent.task_midday"
+  # schedule:
+  # crontab:
+  # hour: 11
+  # minute: 35
+  # day_of_week: "1-5"
+  # description: "InvestorAgent: 午间总结 (11:35)"
+
+  # DISABLED: HeartbeatAgent replaces InvestorAgent (v58.0)
+  # investor_agent_afternoon:
+  # task: "openclaw.tasks.investor_agent.task_afternoon"
+  # schedule:
+  # crontab:
+  # hour: 13
+  # minute: 30
+  # day_of_week: "1-5"
+  # description: "InvestorAgent: 午后扫描 (13:30)"
+
+  # DISABLED: HeartbeatAgent replaces InvestorAgent (v58.0)
+  # investor_agent_late_session:
+  # task: "openclaw.tasks.investor_agent.task_late_session"
+  # schedule:
+  # crontab:
+  # hour: 14
+  # minute: 30
+  # day_of_week: "1-5"
+  # description: "InvestorAgent: 尾盘决策 (14:30) ★ CRITICAL"
+
+  # DISABLED: HeartbeatAgent replaces InvestorAgent (v58.0)
+  # investor_agent_close:
+  # task: "openclaw.tasks.investor_agent.task_close"
+  # schedule:
+  # crontab:
+  # hour: 15
+  # minute: 5
+  # day_of_week: "1-5"
+  # description: "InvestorAgent: 收盘总结 (15:05)"
+
+  # Thesis lifecycle automation (15:35 Mon-Fri)
+  thesis_lifecycle:
+    task: "openclaw.tasks.thesis_lifecycle.task_thesis_lifecycle"
     schedule:
       crontab:
         hour: 15
+        minute: 35
+        day_of_week: "1-5"
+    description: "论点生命周期检查: 衰减/过期/失效/清理 (15:35 CST)"
+
+  # v50.0 §13.2: Weekly review — aggregate performance + calibration (Saturday 10:00)
+  weekly_review:
+    task: "openclaw.tasks.weekly_review.task_weekly_review"
+    schedule:
+      crontab:
+        hour: 10
+        minute: 0
+        day_of_week: "6"
+    description: "周度复盘 (周六10:00, 绩效归因+校准检查+参数建议)"
+
+  # v38.0: Daily outcome verification — AI feedback loop (16:30 Mon-Fri)
+  daily_outcome_verification:
+    task: "openclaw.tasks.daily_outcome_verification.task_daily_outcome_verification"
+    schedule:
+      crontab:
+        hour: 16
         minute: 30
         day_of_week: "1-5"
-    description: "收盘复盘 (15:30 CST)"
+    description: "每日决策复盘: 信号验证 + 置信度校准 + 论点审查 (16:30 CST)"
+
+  # v53.0: Global Intelligence — Sentinel crawl (RSS feeds every 5 min during extended hours)
+  sentinel_crawl:
+    task: "openclaw.tasks.global_intelligence.task_sentinel_crawl"
+    schedule:
+      crontab:
+        minute: "*/5"
+        hour: "7-23"
+        day_of_week: "1-5"
+    description: "全球情报哨兵: 30+ RSS源爬取 (7:00-23:00每5分钟)"
+
+  # v57.0: Chinese A-share news direct crawl (every 10 min during trading)
+  cn_news_crawl:
+    task: "openclaw.tasks.global_intelligence.task_cn_news_crawl"
+    schedule:
+      crontab:
+        minute: "*/5"
+        hour: "7-22"
+        day_of_week: "1-5"
+    description: "A股中文新闻: CLS+WSCN+Jin10+Sina+东方财富 (7:00-22:00每5分钟, 覆盖盘前盘后)"
+
+  # v53.0: Global Intelligence — Analyst pipeline (causal chains every 10 min)
+  analyst_pipeline:
+    task: "openclaw.tasks.global_intelligence.task_analyst_pipeline"
+    schedule:
+      crontab:
+        minute: "*/10"
+        hour: "7-23"
+        day_of_week: "1-5"
+    description: "全球情报分析: 事件理解+因果链+历史类比 (7:00-23:00每10分钟)"
+
+  # v53.0: Global Intelligence — Wire digest (global market summary every 30 min)
+  wire_digest:
+    task: "openclaw.tasks.global_intelligence.task_wire_digest"
+    schedule:
+      crontab:
+        minute: "*/30"
+        hour: "7-23"
+        day_of_week: "1-5"
+    description: "全球市场简报 (7:00-23:00每30分钟)"
+
+  # v53.0: Global Intelligence — Macro pulse (data release monitoring)
+  macro_pulse:
+    task: "openclaw.tasks.global_intelligence.task_macro_pulse"
+    schedule:
+      crontab:
+        minute: "*/5"
+        hour: "8-10,14-16,20-22"
+        day_of_week: "1-5"
+    description: "宏观数据脉冲: 经济数据发布监控 (关键时段每5分钟)"
+
+  # v50.0: Impact engine consumer — drain events:news through causal chain pipeline
+  impact_engine_consumer:
+    task: "openclaw.tasks.impact_engine_consumer.task_consume_news_for_impact"
+    schedule:
+      crontab:
+        minute: "*"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "事件影响引擎消费者 (交易时段每60秒, 因果链分析)"
+
+  # v50.0: Signal consumer — route market/news events to InvestmentDirector
+  signal_consumer:
+    task: "openclaw.tasks.signal_consumer.task_consume_signals"
+    schedule:
+      crontab:
+        minute: "*"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "信号消费者 (交易时段每60秒, 事件→Director.handle_event)"
+
+  # v50.0: Risk consumer — monitor stop-loss, regime changes, risk budget
+  risk_consumer:
+    task: "openclaw.tasks.risk_consumer.task_consume_risk_events"
+    schedule:
+      crontab:
+        minute: "*"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "风控消费者 (交易时段每60秒, 止损/风险预算监控)"
+
+  # v50.0: Notification consumer — push signals/risk/regime to MessageStore+Discord
+  notification_consumer:
+    task: "openclaw.tasks.notification_consumer.task_consume_notifications"
+    schedule:
+      crontab:
+        minute: "*"
+        hour: "8-16"
+        day_of_week: "1-5"
+    description: "通知消费者 (8:00-16:00每60秒, 消息推送+去重)"
+
+  # v50.0: Portfolio consumer — update DailyPlan from signals and regime
+  portfolio_consumer:
+    task: "openclaw.tasks.portfolio_consumer.task_consume_portfolio_events"
+    schedule:
+      crontab:
+        minute: "*"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "组合消费者 (交易时段每60秒, DailyPlan/仓位限制更新)"
+
+  # v50.0: Evaluation consumer — track thesis lifecycle from portfolio events
+  evaluation_consumer:
+    task: "openclaw.tasks.evaluation_consumer.task_consume_evaluation_events"
+    schedule:
+      crontab:
+        minute: "*/2"
+        hour: "9-17"
+        day_of_week: "1-5"
+    description: "评估消费者 (9:00-17:00每2分钟, 论点生命周期追踪)"
 
   # v35.0: Decision outcome backfill (16:45 Mon-Fri)
   decision_backfill:
@@ -346,15 +606,59 @@ beat_schedule:
         day_of_week: "1-5"
     description: "夜间研究 (20:00 CST)"
 
-  # v28.0: Recommendation cleanup (daily at 18:00)
-  recommendation_cleanup:
-    task: "openclaw.tasks.recommendation_cleanup.task_recommendation_cleanup"
+  # v55.0: Nightly calibration (20:30 Mon-Fri)
+  nightly_calibration:
+    task: "openclaw.tasks.calibration_task.task_nightly_calibration"
     schedule:
       crontab:
-        hour: 18
+        hour: 20
         minute: 30
         day_of_week: "1-5"
-    description: "过期推荐清理 (每日18:30)"
+    description: "校准闭环: 决策结果→反思→Bayesian更新 (20:30 CST)"
+
+  # v56.0: Event-driven agent consumer (every minute during trading hours)
+  # DISABLED: replaced by always-on-agent daemon (v60.0 KAIROS architecture)
+  # event_agent_consumer:
+  #   task: "openclaw.tasks.event_agent_consumer.task_event_driven_agent_consumer"
+  #   schedule:
+  #     crontab:
+  #       minute: "*"
+  #       hour: "9-15"
+  #       day_of_week: "1-5"
+  #   description: "事件驱动Agent: replaced by always-on-agent daemon"
+
+  # v57.0: Market opportunity scanner (every 15 min during trading hours)
+  market_opportunity_scan:
+    task: "openclaw.tasks.market_scanner.task_market_opportunity_scan"
+    schedule:
+      crontab:
+        minute: "7,22,37,52"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "全市场扫描: 涨停池+板块资金+龙头评分 (零LLM成本, 每15分钟)"
+
+  # v57.0: InvestorAgent market scan sessions
+  # DISABLED: HeartbeatAgent replaces InvestorAgent (v58.0)
+  # investor_agent_market_scan_am:
+  # task: "openclaw.tasks.investor_agent.task_market_scan"
+  # schedule:
+  # crontab:
+  # hour: 10
+  # minute: 3
+  # day_of_week: "1-5"
+  # description: "InvestorAgent: 早盘全市场扫描 (10:03)"
+
+  # DISABLED: HeartbeatAgent replaces InvestorAgent (v58.0)
+  # investor_agent_market_scan_pm:
+  # task: "openclaw.tasks.investor_agent.task_market_scan"
+  # schedule:
+  # crontab:
+  # hour: 13
+  # minute: 3
+  # day_of_week: "1-5"
+  # description: "InvestorAgent: 午后全市场扫描 (13:03)"
+
+  # v28.0: recommendation_cleanup — REMOVED in v38.0 AI-first refactor
 
 # v3.2 FR-SS001: Timeline scheduling profiles
 timeline:

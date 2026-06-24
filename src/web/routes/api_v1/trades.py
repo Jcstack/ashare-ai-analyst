@@ -16,9 +16,15 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from src.web.dependencies import get_confirmation_gate, get_trade_service
+from src.web.dependencies import (
+    get_confirmation_gate,
+    get_execution_bridge,
+    get_kill_switch,
+    get_trade_service,
+)
 from src.web.schemas.chat import AgentRecommendation, Trade, TradingProfile
 from src.web.services.trade_service import TradeService
+from src.trading.kill_switch import KillSwitch
 from src.workflow.confirmation_gate import ConfirmationGate
 
 
@@ -128,6 +134,13 @@ class RecommendationDecisionRequest(BaseModel):
 
     decision: Literal["accepted", "rejected", "modified"]
     feedback: str | None = None
+
+
+class KillSwitchRequest(BaseModel):
+    """Request to toggle the kill switch."""
+
+    active: bool
+    reason: str = ""
 
 
 class TradeListResponse(BaseModel):
@@ -287,13 +300,16 @@ def create_gate(
     )
 
 
-@router.post("/trades/gate/{request_id}/confirm", response_model=GateResponse)
+@router.post("/trades/gate/{request_id}/confirm")
 def confirm_gate(
     request_id: str,
     req: ConfirmGateRequest,
     gate: ConfirmationGate = Depends(get_confirmation_gate),
-) -> Any:
-    """User confirms a gate request (RISK_APPROVED → USER_CONFIRMED)."""
+) -> dict[str, Any]:
+    """User confirms a gate request (RISK_APPROVED → USER_CONFIRMED).
+
+    In broker mode, this also triggers order submission via ExecutionBridge.
+    """
     gate_req = gate.get_request(request_id)
     if not gate_req:
         raise HTTPException(status_code=404, detail="Gate request not found")
@@ -308,17 +324,31 @@ def confirm_gate(
     if not success:
         raise HTTPException(status_code=400, detail="Gate confirmation failed")
 
+    # If execution bridge is available, submit to broker
+    execution_bridge = get_execution_bridge()
+    broker_result = None
+    if execution_bridge and execution_bridge.is_live_mode():
+        exec_result = execution_bridge.execute_confirmed(request_id)
+        broker_result = {
+            "status": exec_result.status,
+            "broker_order_id": exec_result.broker_order_id,
+            "reason": exec_result.reason,
+        }
+
     gate_req = gate.get_request(request_id) or gate_req
-    return GateResponse(
-        request_id=gate_req.request_id,
-        symbol=gate_req.symbol,
-        trade_type=gate_req.trade_type,
-        quantity=gate_req.quantity,
-        price=gate_req.price,
-        current_stage=gate_req.current_stage,
-        created_at=gate_req.created_at,
-        updated_at=gate_req.updated_at,
-    )
+    response: dict[str, Any] = {
+        "request_id": gate_req.request_id,
+        "symbol": gate_req.symbol,
+        "trade_type": gate_req.trade_type,
+        "quantity": gate_req.quantity,
+        "price": gate_req.price,
+        "current_stage": gate_req.current_stage,
+        "created_at": gate_req.created_at,
+        "updated_at": gate_req.updated_at,
+    }
+    if broker_result:
+        response["broker"] = broker_result
+    return response
 
 
 @router.get("/trades/gate/{request_id}", response_model=GateResponse)
@@ -341,3 +371,29 @@ def get_gate(
         created_at=gate_req.created_at,
         updated_at=gate_req.updated_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Kill Switch endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/trades/kill-switch")
+def toggle_kill_switch(
+    req: KillSwitchRequest,
+    kill_switch: KillSwitch = Depends(get_kill_switch),
+) -> dict[str, Any]:
+    """Activate or deactivate the trading kill switch."""
+    if req.active:
+        kill_switch.activate(reason=req.reason, activated_by="api")
+    else:
+        kill_switch.deactivate()
+    return kill_switch.status().__dict__
+
+
+@router.get("/trades/kill-switch")
+def get_kill_switch_status(
+    kill_switch: KillSwitch = Depends(get_kill_switch),
+) -> dict[str, Any]:
+    """Get current kill switch state."""
+    return kill_switch.status().__dict__

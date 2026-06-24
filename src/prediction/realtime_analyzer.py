@@ -148,14 +148,19 @@ class RealtimeAnalyzer:
                     f"{RISK_ACTION_MATRIX}\n\n"
                     f"{DATA_INJECTION_RULES}\n\n"
                     f"{board_constraint}\n\n"
-                    "注意根据当前市场时段和预测目标时间窗口调整分析侧重。"
-                    "用户消息中的'预测目标'指明了你应该预测的具体时段。\n\n"
+                    "Adjust analysis emphasis based on the current market session and "
+                    "the prediction target time window. The 'prediction target' in the "
+                    "user message specifies the exact session you should predict.\n\n"
                     f"{data_quality_section}\n\n"
-                    "**关键约束**：\n"
-                    "- 所有数字（价格、涨跌幅、资金流）必须直接引用系统注入数据，禁止编造\n"
-                    "- target_price_range 必须基于当前价格和技术位推导，不得凭空给出\n"
-                    "- data_references 必须 ≥ 3 条，每条引用注入数据中的具体数值\n\n"
-                    "你必须严格按照JSON格式输出，不要添加任何多余文字。\n\n"
+                    "**Key constraints**:\n"
+                    "- All numbers (prices, change %, capital flow) MUST be cited from "
+                    "injected system data — do NOT fabricate any figures\n"
+                    "- target_price_range MUST be derived from current price and "
+                    "technical levels — do NOT invent values\n"
+                    "- data_references MUST contain >= 3 entries, each citing a specific "
+                    "value from the injected data\n\n"
+                    "Write all output text in Chinese.\n"
+                    "Output STRICTLY in the following JSON format with no extra text.\n\n"
                     "```json\n"
                     "{\n"
                     '  "trend": "bullish | bearish | neutral",\n'
@@ -271,7 +276,9 @@ class RealtimeAnalyzer:
         session = get_market_session()
         session_label = session["label"]
 
-        board_note = f"该股属于{board_type}({price_limit})。" if board_type else ""
+        board_note = (
+            f"This stock belongs to {board_type} ({price_limit})." if board_type else ""
+        )
 
         messages = [
             LLMMessage(
@@ -279,9 +286,11 @@ class RealtimeAnalyzer:
                 content=(
                     f"{ROLE_DEFINITIONS['quick_insight']}\n\n"
                     f"{QUICK_DIMENSION_FRAMEWORK}\n"
-                    f"当前时段: {session_label}。{board_note}\n"
-                    "用一句话给出投资信号和理由，必须引用至少一个具体数值。"
-                    "严格按照JSON格式输出：\n"
+                    f"Current session: {session_label}. {board_note}\n"
+                    "Provide a one-sentence investment signal with reasoning. "
+                    "You MUST cite at least one specific data value.\n"
+                    "Write all output text in Chinese.\n"
+                    "Output STRICTLY in the following JSON format:\n"
                     '{"signal": "bullish|bearish|neutral", "confidence": 0.0~1.0, '
                     '"summary": "一句话总结(含具体数值)", "risk_badge": "low|medium|high", '
                     '"confidence_label": "置信度标签", "key_data": "引用的关键数据点"}'
@@ -353,10 +362,11 @@ class RealtimeAnalyzer:
             LLMMessage(
                 role="system",
                 content=(
-                    "你是A股市场分析师。生成每日市场概览。\n\n"
+                    "You are an A-share market analyst. Generate a daily market overview.\n\n"
                     f"{QUICK_DIMENSION_FRAMEWORK}\n\n"
-                    "注意根据当前市场时段调整分析内容和措辞。\n"
-                    "严格按照JSON格式输出：\n"
+                    "Adjust analysis content and wording based on the current market session.\n"
+                    "Write all output text in Chinese.\n"
+                    "Output STRICTLY in the following JSON format:\n"
                     "```json\n"
                     "{\n"
                     '  "market_trend": "bullish | bearish | neutral",\n'
@@ -463,10 +473,13 @@ class RealtimeAnalyzer:
             LLMMessage(
                 role="system",
                 content=(
-                    "你是A股龙虎榜分析专家。分析个股龙虎榜席位构成、机构/游资动向、历史统计，"
-                    f"给出交易信号和风险提示。当前时段: {session_label}。\n\n"
+                    "You are an A-share 龙虎榜 (dragon-tiger list) analysis expert. "
+                    "Analyze the stock's dragon-tiger seat composition, "
+                    "institutional vs. hot-money (游资) activity, and historical statistics. "
+                    f"Provide trading signals and risk warnings. Current session: {session_label}.\n\n"
                     f"{QUICK_DIMENSION_FRAMEWORK}\n\n"
-                    "严格按照JSON格式输出：\n"
+                    "Write all output text in Chinese.\n"
+                    "Output STRICTLY in the following JSON format:\n"
                     "```json\n"
                     "{\n"
                     '  "summary": "一句话总结",\n'
@@ -537,6 +550,7 @@ class RealtimeAnalyzer:
         price_limit: str = "",
         valuation: dict[str, Any] | None = None,
         fund_flow_detail: dict[str, Any] | None = None,
+        fund_flow_timeline: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Comprehensive realtime analysis combining fund-flow, dragon-tiger,
         quotes, indicators, strategy signals, Bayesian probabilities, and
@@ -556,6 +570,7 @@ class RealtimeAnalyzer:
             price_limit: Price limit string.
             valuation: Valuation indicator dict (PE/PB/PS/dividend/market cap).
             fund_flow_detail: Per-order-size inflow/outflow detail dict.
+            fund_flow_timeline: Sampled intraday fund-flow time series.
 
         Returns:
             Comprehensive analysis dict with signal, summary, points, risks.
@@ -566,6 +581,7 @@ class RealtimeAnalyzer:
             format_board_constraint,
             format_fund_flow,
             format_fund_flow_detail,
+            format_fund_flow_timeline,
             format_strategy_signals,
             format_valuation,
         )
@@ -580,6 +596,11 @@ class RealtimeAnalyzer:
         detail_section = ""
         if fund_flow_detail:
             detail_section = f"\n\n### 资金流明细（分档）\n{format_fund_flow_detail(fund_flow_detail)}"
+
+        timeline_section = ""
+        timeline_text = format_fund_flow_timeline(fund_flow_timeline)
+        if timeline_text:
+            timeline_section = f"\n\n### 盘中资金流向时间线（实际采样数据，禁止编造未提供的时间点）\n{timeline_text}"
 
         dt_info = "无龙虎榜数据"
         if dragon_tiger:
@@ -603,6 +624,7 @@ class RealtimeAnalyzer:
             f"### 估值指标\n{valuation_info}\n\n"
             f"### 盘中资金流向\n{flow_info}\n\n"
             f"{detail_section}"
+            f"{timeline_section}"
             f"### 近期龙虎榜\n{dt_info}\n\n"
             f"### 量化策略信号\n{strategy_info}\n\n"
             f"### 贝叶斯历史概率\n{bayesian_info}\n"
@@ -619,12 +641,16 @@ class RealtimeAnalyzer:
             LLMMessage(
                 role="system",
                 content=(
-                    "你是A股实时综合分析师。结合行情、估值指标、资金流向、资金流明细、龙虎榜、技术指标、"
-                    "量化策略信号和贝叶斯概率，给出简明的综合分析。\n\n"
+                    "You are an A-share real-time comprehensive analyst. Synthesize "
+                    "quotes, valuation metrics, capital flow, capital flow breakdown, "
+                    "龙虎榜 (dragon-tiger list), technical indicators, quantitative "
+                    "strategy signals, and Bayesian probabilities into a concise "
+                    "comprehensive analysis.\n\n"
                     f"{QUICK_DIMENSION_FRAMEWORK}\n\n"
                     f"{board_note}\n"
-                    "注意根据当前市场时段调整分析侧重。\n"
-                    "严格按照JSON格式输出：\n"
+                    "Adjust analysis emphasis based on the current market session.\n"
+                    "Write all output text in Chinese.\n"
+                    "Output STRICTLY in the following JSON format:\n"
                     "```json\n"
                     "{\n"
                     '  "signal": "bullish | bearish | neutral",\n'
@@ -724,10 +750,12 @@ class RealtimeAnalyzer:
             LLMMessage(
                 role="system",
                 content=(
-                    "你是A股技术分析专家。分析支撑/阻力位的强度，结合资金流向给出操作建议。"
-                    f"当前时段: {session_label}。\n\n"
+                    "You are an A-share technical analysis expert. Analyze the strength "
+                    "of support/resistance levels and combine with capital flow data "
+                    f"to provide actionable trading advice. Current session: {session_label}.\n\n"
                     f"{QUICK_DIMENSION_FRAMEWORK}\n\n"
-                    "严格按照JSON格式输出：\n"
+                    "Write all output text in Chinese.\n"
+                    "Output STRICTLY in the following JSON format:\n"
                     "```json\n"
                     "{\n"
                     '  "summary": "一段话概括",\n'
@@ -1303,6 +1331,7 @@ class RealtimeAnalyzer:
         support_resistance: list[dict[str, Any]] | None = None,
         dragon_tiger: list[dict[str, Any]] | None = None,
         fund_flow_detail: dict[str, Any] | None = None,
+        fund_flow_timeline: list[dict[str, Any]] | None = None,
         divergence_signals: list[dict[str, Any]] | None = None,
         valuation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -1360,6 +1389,7 @@ class RealtimeAnalyzer:
             format_support_resistance,
             format_dragon_tiger,
             format_fund_flow_detail,
+            format_fund_flow_timeline,
             format_divergence_signals,
             format_valuation,
         )
@@ -1421,7 +1451,7 @@ class RealtimeAnalyzer:
             f"\n### 实时行情\n{self._format_quote(quote)}",
             f"\n### 技术指标\n{self._format_indicators(indicators)}",
             f"\n### 资金流向\n{format_fund_flow(fund_flow)}",
-            f"\n### 量化信号 (系统预计算 — 请引用，不要重新计算)\n{format_quant_signals(precomputed_quant)}",
+            f"\n### 量化信号 (system pre-computed — cite these, do NOT recalculate)\n{format_quant_signals(precomputed_quant)}",
             f"\n### 贝叶斯分析\n{format_bayesian_context(bayesian_analysis or {})}",
             f"\n### 量化策略信号\n{format_strategy_signals(strategy_signals or {})}",
             f"\n### 估值指标\n{format_valuation(valuation)}",
@@ -1434,6 +1464,12 @@ class RealtimeAnalyzer:
         if dragon_tiger:
             user_sections.append(
                 f"\n### 龙虎榜数据\n{format_dragon_tiger(dragon_tiger)}"
+            )
+
+        timeline_text = format_fund_flow_timeline(fund_flow_timeline)
+        if timeline_text:
+            user_sections.append(
+                f"\n### 盘中资金流向时间线（实际采样数据，禁止编造未提供的时间点）\n{timeline_text}"
             )
 
         if fund_flow_detail:

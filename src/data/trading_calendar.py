@@ -111,7 +111,10 @@ def _load_adata_trading_dates(
                 result |= year_dates
                 covered.add(year)
             else:
-                logger.warning("adata returned no data for %d", year)
+                if year <= date.today().year:
+                    logger.warning("adata returned no data for %d", year)
+                else:
+                    logger.debug("adata has no data yet for future year %d", year)
         except (concurrent.futures.TimeoutError, TimeoutError):
             logger.warning("adata calendar timed out for %d", year)
             future.cancel()
@@ -259,6 +262,28 @@ class TradingCalendar:
                 self._emergency_closures[d] = reason
             except (KeyError, ValueError, TypeError):
                 logger.warning("Invalid emergency closure entry: %s", entry)
+
+    def prev_trading_day(self, d: date | None = None, n: int = 1) -> date:
+        """Return the *n*-th previous trading day before *d* (exclusive).
+
+        Args:
+            d: Reference date (default: today).
+            n: How many trading days to go back (default 1).
+
+        Returns:
+            The resulting ``date``.
+        """
+        if d is None:
+            d = date.today()
+        count = 0
+        cur = d - timedelta(days=1)
+        while count < n:
+            if self.is_trading_day(cur):
+                count += 1
+                if count >= n:
+                    return cur
+            cur -= timedelta(days=1)
+        return cur  # pragma: no cover – should not reach
 
     def is_trading_day(self, d: date | None = None) -> bool:
         """Check if the given date is an A-share trading day.

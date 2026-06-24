@@ -79,7 +79,45 @@ def task_qlib_data_update(self) -> dict[str, Any]:
     logger.info("Starting Qlib data update from parquet cache")
 
     try:
+        import sys
+        from pathlib import Path
+
+        # Ensure /app (project root) is on sys.path for celery fork workers
+        app_root = str(Path(__file__).resolve().parent.parent)
+        if app_root not in sys.path:
+            sys.path.insert(0, app_root)
+
         from scripts.qlib_data_updater import update_from_cache
+
+        # Check if Qlib data directory exists locally (only works if
+        # qlib-service shares a volume or runs on the same host)
+        from pathlib import Path
+
+        qlib_data_dir = Path.home() / ".qlib" / "qlib_data" / "cn_data"
+        if not qlib_data_dir.exists():
+            # Qlib data lives in qlib-service container, not here.
+            # Check qlib-service health to report actual state.
+            try:
+                import requests
+
+                resp = requests.get("http://qlib-service:8001/health", timeout=5)
+                health = resp.json()
+                cal_end = health.get("calendar_end", "unknown")
+                logger.warning(
+                    "Qlib data dir not found locally (%s). "
+                    "Qlib-service reports calendar_end=%s. "
+                    "Data update requires shared volume or qlib-service API endpoint.",
+                    qlib_data_dir,
+                    cal_end,
+                )
+                return {
+                    "status": "skipped",
+                    "reason": "qlib_data_on_separate_container",
+                    "qlib_service_calendar_end": cal_end,
+                }
+            except Exception:
+                pass
+            return {"status": "skipped", "reason": "qlib_data_dir_not_found"}
 
         result = update_from_cache()
 

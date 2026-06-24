@@ -27,8 +27,9 @@ _STATIC_DIR = _PROJECT_ROOT / "static"
 
 _SLOW_REQUEST_THRESHOLD = 2.0  # seconds
 
-# Valid A-share symbol: 6 digits, optionally prefixed by 1-2 uppercase letters
-_SYMBOL_RE = re.compile(r"^[A-Za-z]{0,2}\d{6}$")
+# Valid A-share symbol: 6 digits, optionally prefixed by exchange letters
+# or suffixed by .SZ/.SH/.BJ (e.g. 000983, sz000983, 000983.SZ)
+_SYMBOL_RE = re.compile(r"^[A-Za-z]{0,2}\d{6}(?:\.[A-Za-z]{2,3})?$")
 
 # URL path segments where the next segment is a stock symbol
 _SYMBOL_ROUTES = re.compile(r"/api/v1/(?:stock|predict|advisor/stock)/([^/]+)")
@@ -165,6 +166,54 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health_check():
         return {"status": "ok"}
+
+    @app.get("/health/deep")
+    async def health_deep():
+        """Deep health check — verifies all critical dependencies."""
+        checks: dict[str, str] = {}
+
+        # Redis (Celery broker)
+        try:
+            from src.web.dependencies import get_redis
+
+            r = get_redis()
+            if r:
+                r.ping()
+                checks["redis"] = "ok"
+            else:
+                checks["redis"] = "unavailable"
+        except Exception as exc:
+            checks["redis"] = f"error: {exc}"
+
+        # EventBus (Redis Streams)
+        try:
+            from src.event_bus.bus import EventBus
+
+            EventBus()
+            # EventBus lazily connects; just verify config resolves
+            checks["eventbus"] = "ok"
+        except Exception as exc:
+            checks["eventbus"] = f"error: {exc}"
+
+        # LLM Router
+        try:
+            from src.web.dependencies import get_llm_router
+
+            router = get_llm_router()
+            providers = [p.value for p in router._providers.keys()]
+            checks["llm"] = f"ok ({', '.join(providers)})"
+        except Exception as exc:
+            checks["llm"] = f"error: {exc}"
+
+        all_ok = all(v.startswith("ok") for v in checks.values())
+        status_code = 200 if all_ok else 503
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "status": "ok" if all_ok else "degraded",
+                "checks": checks,
+            },
+        )
 
     # JSON REST API v1 for React SPA
     app.include_router(api_v1.router)

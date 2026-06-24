@@ -6,11 +6,14 @@ Mounts alongside the existing Jinja2/htmx routes with no conflicts.
 from fastapi import APIRouter
 
 from src.web.routes.api_v1 import (
+    action_queue,
     admin,
     advisor,
     agent,
     agent_loop,
+    ai_news,
     backtest,
+    bootstrap,
     capital,
     capital_flow,
     chat,
@@ -23,18 +26,22 @@ from src.web.routes.api_v1 import (
     intelligence_hub,
     market,
     market_intelligence,
+    messages,
     news,
     notifications,
+    performance,
     portfolio,
     predictions,
     prompts,
-    recommendations,
+    regime,
+    review,
     scheduler,
     search,
     sentiment,
     settings,
     stocks,
     strategy_lab,
+    theses,
     trades,
     user_config,
 )
@@ -70,5 +77,12 @@ router.include_router(intelligence.router, prefix="/intelligence")
 router.include_router(intelligence_hub.router, prefix="/intelligence-hub")
 router.include_router(intel_reports.router)
 router.include_router(capital_flow.router, prefix="/capital-flow")
-router.include_router(recommendations.router, prefix="/recommendations")
+router.include_router(theses.router)
 router.include_router(agent_loop.router)
+router.include_router(messages.router, prefix="/messages")
+router.include_router(performance.router, prefix="/performance")
+router.include_router(action_queue.router, prefix="/actions")
+router.include_router(bootstrap.router)
+router.include_router(regime.router)
+router.include_router(review.router)
+router.include_router(ai_news.router, prefix="/ai-news")

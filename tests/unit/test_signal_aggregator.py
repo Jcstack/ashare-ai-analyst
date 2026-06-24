@@ -13,33 +13,6 @@ def agg():
     return SignalAggregator()
 
 
-class TestAddFromRecommendation:
-    def test_creates_buy_signal(self, agg):
-        rec = {
-            "symbol": "600519",
-            "name": "贵州茅台",
-            "score": 85,
-            "confidence": 0.8,
-            "reasoning": "Strong fundamentals",
-            "entry_price": 1800.0,
-            "target_price": 2000.0,
-            "stop_loss": 1700.0,
-        }
-        signal = agg.add_from_recommendation(rec)
-
-        assert signal is not None
-        assert signal.symbol == "600519"
-        assert signal.direction == SignalDirection.BUY
-        assert signal.source == "recommendation"
-        assert signal.confidence == pytest.approx(0.8)
-        assert signal.urgency == UrgencyTier.NORMAL
-        assert signal.metadata["score"] == 85
-
-    def test_returns_none_below_confidence_threshold(self, agg):
-        rec = {"symbol": "600519", "confidence": 0.1}
-        assert agg.add_from_recommendation(rec) is None
-
-
 class TestAddFromTechnical:
     def test_creates_proper_signal(self, agg):
         sig_dict = {
@@ -135,16 +108,70 @@ class TestAddFromThesisInvalidation:
         assert signal.reason == "Stop loss breached"
 
 
+class TestAddFromLeader:
+    def test_creates_buy_signal_for_leader(self, agg):
+        class MockLeaderScore:
+            symbol = "300059"
+            name = "东方财富"
+            sector = "证券"
+            total_score = 85.0
+            is_leader = True
+            scores = {"first_mover": 30}
+            reason = "首板龙头"
+            confidence_level = "high"
+
+        signal = agg.add_from_leader(MockLeaderScore())
+        assert signal is not None
+        assert signal.symbol == "300059"
+        assert signal.direction == SignalDirection.BUY
+        assert signal.source == "leader_detection"
+        assert signal.confidence == pytest.approx(0.85)
+        assert signal.urgency == UrgencyTier.HIGH
+        assert signal.metadata["total_score"] == 85.0
+        assert signal.metadata["sector"] == "证券"
+
+    def test_ignores_non_leader(self, agg):
+        class MockNonLeader:
+            symbol = "000001"
+            name = "平安银行"
+            sector = "银行"
+            total_score = 40.0
+            is_leader = False
+            scores = {}
+            reason = ""
+            confidence_level = "low"
+
+        result = agg.add_from_leader(MockNonLeader())
+        assert result is None
+
+    def test_medium_confidence_mapping(self, agg):
+        class MockMedium:
+            symbol = "600519"
+            name = "贵州茅台"
+            sector = "白酒"
+            total_score = 72.0
+            is_leader = True
+            scores = {}
+            reason = "跟随龙头"
+            confidence_level = "medium"
+
+        signal = agg.add_from_leader(MockMedium())
+        assert signal is not None
+        assert signal.confidence == pytest.approx(0.70)
+
+
 class TestRankAndDeduplicate:
     def test_sorted_by_priority_desc(self, agg):
         # Add signals with different urgencies
         agg.add_from_thesis_invalidation("A", "StockA", "reason1")  # HIGH
-        agg.add_from_recommendation(
+        agg.add_from_technical(
             {
                 "symbol": "B",
                 "name": "StockB",
+                "signal_type": "macd_cross",
+                "direction": "buy",
                 "confidence": 0.6,
-                "reasoning": "ok",
+                "summary_short": "ok",
             }
         )  # NORMAL
 
@@ -155,20 +182,24 @@ class TestRankAndDeduplicate:
 
     def test_dedup_merges_same_symbol_direction(self, agg):
         # Two BUY signals for the same symbol
-        agg.add_from_recommendation(
+        agg.add_from_technical(
             {
                 "symbol": "600519",
                 "name": "贵州茅台",
+                "signal_type": "rsi",
+                "direction": "buy",
                 "confidence": 0.5,
-                "reasoning": "first",
+                "summary_short": "first",
             }
         )
-        agg.add_from_recommendation(
+        agg.add_from_technical(
             {
                 "symbol": "600519",
                 "name": "贵州茅台",
+                "signal_type": "macd",
+                "direction": "buy",
                 "confidence": 0.9,
-                "reasoning": "second",
+                "summary_short": "second",
             }
         )
 
@@ -180,12 +211,14 @@ class TestRankAndDeduplicate:
         assert buy_signals[0].confidence == pytest.approx(0.9)
 
     def test_different_directions_not_deduped(self, agg):
-        agg.add_from_recommendation(
+        agg.add_from_technical(
             {
                 "symbol": "600519",
                 "name": "贵州茅台",
+                "signal_type": "macd",
+                "direction": "buy",
                 "confidence": 0.7,
-                "reasoning": "buy signal",
+                "summary_short": "buy signal",
             }
         )
         agg.add_from_thesis_invalidation("600519", "贵州茅台", "sell reason")
@@ -198,12 +231,14 @@ class TestRankAndDeduplicate:
 
 class TestClear:
     def test_clear_resets_buffer(self, agg):
-        agg.add_from_recommendation(
+        agg.add_from_technical(
             {
                 "symbol": "600519",
                 "name": "贵州茅台",
+                "signal_type": "macd",
+                "direction": "buy",
                 "confidence": 0.8,
-                "reasoning": "test",
+                "summary_short": "test",
             }
         )
         agg.clear()

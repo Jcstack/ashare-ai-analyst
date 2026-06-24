@@ -68,6 +68,7 @@ class AnalysisContext:
     support_resistance: list[dict[str, Any]] = field(default_factory=list)
     dragon_tiger: list[dict[str, Any]] = field(default_factory=list)
     fund_flow_detail: dict[str, Any] = field(default_factory=dict)
+    fund_flow_timeline: list[dict[str, Any]] = field(default_factory=list)
     policy_context: str = ""
     divergence_signals: list[dict[str, Any]] = field(default_factory=list)
     valuation: dict[str, Any] = field(default_factory=dict)
@@ -96,6 +97,7 @@ class AnalysisDataValidator:
         support_resistance: list[dict[str, Any]] | None = None,
         dragon_tiger: Any = None,
         fund_flow_detail: Any = None,
+        fund_flow_timeline: list[dict] | None = None,
         policy_context: str = "",
         divergence_signals: list[dict[str, Any]] | None = None,
         valuation: dict[str, Any] | None = None,
@@ -238,6 +240,7 @@ class AnalysisDataValidator:
 
         # Enrich with extended context fields
         ctx.capital_flow_context = capital_flow_context or {}
+        ctx.fund_flow_timeline = fund_flow_timeline or []
         ctx.support_resistance = support_resistance or []
         ctx.policy_context = policy_context
         ctx.divergence_signals = divergence_signals or []

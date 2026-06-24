@@ -104,7 +104,7 @@ class TestAnthropicProvider:
         from src.llm.anthropic import AnthropicProvider
 
         provider = AnthropicProvider(api_key="sk-test12345678")
-        assert provider.default_model == "claude-sonnet-4-6"
+        assert provider.default_model == "claude-opus-4-6"
 
     def test_custom_model(self, mock_anthropic_sdk, mock_response):
         mock_anthropic_sdk.messages.create.return_value = mock_response
@@ -113,9 +113,9 @@ class TestAnthropicProvider:
 
         provider = AnthropicProvider(
             api_key="sk-test12345678",
-            default_model="claude-opus-4-8",
+            default_model="claude-opus-4-6",
         )
-        assert provider.default_model == "claude-opus-4-8"
+        assert provider.default_model == "claude-opus-4-6"
 
     def test_check_balance(self, mock_anthropic_sdk):
         from src.llm.anthropic import AnthropicProvider
@@ -141,6 +141,6 @@ class TestAnthropicProvider:
         messages = [LLMMessage(role="user", content="Test")]
         result = provider.complete(messages)
 
-        # 100 input * 0.003/1K + 200 output * 0.015/1K
-        expected_cost = 100 * 0.003 / 1000 + 200 * 0.015 / 1000
+        # 100 input * 0.015/1K + 200 output * 0.075/1K (opus pricing)
+        expected_cost = 100 * 0.015 / 1000 + 200 * 0.075 / 1000
         assert abs(result.cost_usd - expected_cost) < 0.0001

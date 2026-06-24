@@ -1,10 +1,31 @@
 # Multi-LLM 配置 (Multi-LLM Configuration)
 
 providers:
-  claude_code:
-    enabled: true  # Primary — routes through Claude Code bridge (no API key needed)
+  gemini_web:
+    enabled: false  # Disabled — replaced by Google API (gemini-3.x)
     requires_api_key: false
-    default_model: "sonnet"  # Claude Code model alias
+    default_model: "gemini-3.0-thinking"  # Gemini 3 Thinking mode (Google One Pro)
+    chrome_debug_url: "http://host.docker.internal:9223"  # Docker → host (via chrome_debug_proxy.py)
+    chrome_debug_url_host: "http://127.0.0.1:9222"       # native (non-Docker, direct)
+    gemini_url: "https://gemini.google.com/app"
+    use_temporary_chat: true
+    use_thinking_mode: true
+    timeout_per_request: 300  # 5 min — Thinking mode can be slow
+    page_load_timeout: 15
+    max_retries: 2
+    retry_delay: 3.0
+    models:
+      gemini-3.0-thinking:
+        cost_per_1k_input: 0.0
+        cost_per_1k_output: 0.0
+        quality_score: 0.95
+    rate_limit:
+      requests_per_minute: 10  # Conservative for web UI automation
+
+  claude_code:
+    enabled: false  # Disabled — Claude Code reserved for development only, not production
+    requires_api_key: false
+    default_model: "sonnet"  # Sonnet 4.6 — fast + quality, not Opus (overkill for routine)
     models:
       sonnet:
         cost_per_1k_input: 0.0
@@ -15,50 +36,81 @@ providers:
         cost_per_1k_output: 0.0
         quality_score: 0.98
     rate_limit:
-      requests_per_minute: 500  # Claude Code has no meaningful rate limit
+      requests_per_minute: 500
 
   anthropic:
-    enabled: false  # Disabled — no API key; using Claude Code bridge instead
+    enabled: false
     default_model: "claude-sonnet-4-6"
     models:
       claude-sonnet-4-6:
         cost_per_1k_input: 0.003
         cost_per_1k_output: 0.015
         quality_score: 0.93
-      claude-opus-4-8:
-        cost_per_1k_input: 0.005
-        cost_per_1k_output: 0.025
-        quality_score: 0.99
-      claude-haiku-4-5:
-        cost_per_1k_input: 0.001
-        cost_per_1k_output: 0.005
-        quality_score: 0.85
+      claude-opus-4-6:
+        cost_per_1k_input: 0.015
+        cost_per_1k_output: 0.075
+        quality_score: 0.98
+      claude-haiku-3-5:
+        cost_per_1k_input: 0.0008
+        cost_per_1k_output: 0.004
+        quality_score: 0.80
     rate_limit:
       requests_per_minute: 50
 
-  openai:
-    enabled: false
-    default_model: "gpt-4o"
+  deepseek:
+    enabled: true  # DeepSeek V3.2 — best Chinese NLP, cheapest API
+    requires_api_key: true
+    default_model: "deepseek-chat"
     models:
-      gpt-4o:
-        cost_per_1k_input: 0.0025
-        cost_per_1k_output: 0.01
-        quality_score: 0.90
-      gpt-4o-mini:
-        cost_per_1k_input: 0.00015
-        cost_per_1k_output: 0.0006
-        quality_score: 0.78
-      gpt-4-turbo:
-        cost_per_1k_input: 0.01
-        cost_per_1k_output: 0.03
+      deepseek-chat:
+        cost_per_1k_input: 0.00028
+        cost_per_1k_output: 0.00042
         quality_score: 0.88
+      deepseek-reasoner:
+        cost_per_1k_input: 0.00028
+        cost_per_1k_output: 0.00042
+        quality_score: 0.92
     rate_limit:
       requests_per_minute: 60
 
+  openai:
+    enabled: true  # OpenAI — reasoning engine (o4-mini, gpt-5.4-mini)
+    default_model: "gpt-5.4-mini"
+    models:
+      gpt-5.4:
+        cost_per_1k_input: 0.0025
+        cost_per_1k_output: 0.015
+        quality_score: 0.95
+      gpt-5.4-mini:
+        cost_per_1k_input: 0.00075
+        cost_per_1k_output: 0.0045
+        quality_score: 0.92
+      gpt-5.4-nano:
+        cost_per_1k_input: 0.0002
+        cost_per_1k_output: 0.00125
+        quality_score: 0.85
+      gpt-4.1-nano:
+        cost_per_1k_input: 0.0001
+        cost_per_1k_output: 0.0004
+        quality_score: 0.80
+      o3:
+        cost_per_1k_input: 0.002
+        cost_per_1k_output: 0.008
+        quality_score: 0.97
+      o4-mini:
+        cost_per_1k_input: 0.0011
+        cost_per_1k_output: 0.0044
+        quality_score: 0.93
+    rate_limit:
+      requests_per_minute: 500
+
   google:
-    enabled: true  # Fallback — used for complete_with_tools() (agent tool loops)
-    default_model: "gemini-2.5-flash"
-    fallback_model: "gemini-2.0-flash"
+    enabled: true  # Primary — Gemini 3 Flash (free), cascading fallback
+    default_model: "gemini-3-flash-preview"
+    fallback_model: "gemini-2.5-pro"  # single fallback (compat)
+    fallback_models:  # ordered fallback chain
+      - "gemini-2.5-pro"
+      - "gemini-2.5-flash"
     models:
       gemini-2.5-flash:
         cost_per_1k_input: 0.00015
@@ -68,30 +120,159 @@ providers:
         cost_per_1k_input: 0.0001
         cost_per_1k_output: 0.0004
         quality_score: 0.82
+      # 高质量推理
+      gemini-2.5-pro:
+        cost_per_1k_input: 0.00125
+        cost_per_1k_output: 0.01
+        quality_score: 0.95
+      # 超轻量扫描
+      gemini-2.0-flash-lite:
+        cost_per_1k_input: 0.000075
+        cost_per_1k_output: 0.0003
+        quality_score: 0.75
+      # Gemini 3.x — 免费层
+      gemini-3.1-pro-preview:
+        cost_per_1k_input: 0.0
+        cost_per_1k_output: 0.0
+        quality_score: 0.97
+      gemini-3-flash-preview:
+        cost_per_1k_input: 0.0
+        cost_per_1k_output: 0.0
+        quality_score: 0.90
+      gemini-3.1-flash-lite-preview:
+        cost_per_1k_input: 0.0
+        cost_per_1k_output: 0.0
+        quality_score: 0.78
     rate_limit:
-      requests_per_minute: 500  # Tier 1 quota: 2000 RPM; 500 covers peak concurrency with safety margin
+      requests_per_minute: 100  # aggregate, per-model limits in budget section
 
 rate_limiting:
-  cache_ttl: 60          # Dedup cache TTL in seconds
-  cache_max_size: 100    # Max cached responses
+  cache_ttl: 60
+  cache_max_size: 100
 
-# Caller-based model routing: map caller prefixes to specific models.
-# Callers not listed here use the provider's default_model (gemini-2.5-flash).
-# Longest-prefix matching: "holiday_research.qa" wins over "holiday_research".
-#
-# After Gemini 3 retirement (2026-03-03), all Gemini callers use the
-# unified default (2.5-flash). Deep analysis is handled by Claude Code
-# personas instead. The map is kept empty but the mechanism remains for
-# future per-caller overrides if needed.
-caller_model_map: {}
+caller_model_map:
+  # ═══════════════════════════════════════════════════════════════
+  # oh-my-openagent 范式: 不同模型有不同"思维方式"
+  #   Gemini — 跑量、视觉、长文档 (Explore/Librarian)
+  #   OpenAI — 推理、结构化输出、审计链 (Oracle/Hephaestus)
+  #   DeepSeek — 中文理解、廉价NLP (本土化输出)
+  # ═══════════════════════════════════════════════════════════════
 
-# Dynamic upgrade rules — disabled.
-# Previously upgraded 2.5-flash → 3-flash on keyword/context triggers.
-# Now unnecessary: simple → 2.5-flash, deep → Claude Code personas.
+  # ─── GEMINI: 扫描员 (volume, speed, free) ───
+  # 83.61% 金融准确率 + Tier 1 高 RPM → 最佳扫描
+  # ⚠️ NEVER use Gemini for decision missions — it writes reports, not JSON
+  ust_scan: "gemini-3-flash-preview"
+  market_scan: "gemini-3-flash-preview"
+  candidate_filter: "gemini-3-flash-preview"
+  sentiment_scan: "gemini-3-flash-preview"
+  screener: "gemini-3-flash-preview"
+  review_agent: "openai:o4-mini"     # o4-mini: structured JSON output + reasoning
+  judge: "gemini-2.5-flash"
+  ust_fallback: "gemini-2.5-flash"
+
+  # ─── DEEPSEEK: 中文大脑 (Chinese NLP, intel, user-facing output) ───
+  # C-Eval 86.5 + $0.28/1M → 中文新闻/情报/消息的最优选
+  news_parse: "deepseek:deepseek-chat"
+  intel_analysis: "deepseek:deepseek-chat"
+  event_understanding: "deepseek:deepseek-chat"
+  intel_analysis_pipeline: "deepseek:deepseek-chat"
+  historical_analogy: "deepseek:deepseek-chat"
+  trading_advisor.assess_holiday_impact: "deepseek:deepseek-chat"
+
+  # ─── Agent Chat (deep analysis needs strong model) ───
+  agent_service: "openai:gpt-5.4-mini"
+
+  # ─── DEEPSEEK: 对话 + 分析 (Chinese NLP, user-facing) ───
+  conversation_service.followup: "deepseek:deepseek-chat"
+  sentiment_report.generate_report: "deepseek:deepseek-chat"
+  sentiment_analyzer.analyze_batch: "deepseek:deepseek-chat"
+  move_analyzer.analyze_move: "deepseek:deepseek-chat"
+  portfolio_service.diagnose_portfolio: "deepseek:deepseek-chat"
+  agent_service.send_message: "deepseek:deepseek-chat"
+  agent_service.summarize_timeout: "deepseek:deepseek-chat"
+  sub_agent.research: "deepseek:deepseek-chat"
+  replay_agent: "deepseek:deepseek-chat"
+
+  # ─── GEMINI: 快速问答 (v56.0 fast path) ───
+  quick_trade_check: "gemini-3-flash-preview"
+
+  # ─── GEMINI: realtime_analyzer (量大、免费、盘中高频) ───
+  realtime_analyzer.unified: "gemini-2.5-flash"
+  realtime_analyzer.comprehensive: "gemini-2.5-flash"
+  realtime_analyzer.quick: "gemini-3-flash-preview"
+  realtime_analyzer.deep: "gemini-2.5-pro"
+  realtime_analyzer.market_overview: "gemini-2.5-flash"
+  realtime_analyzer.dragon_tiger: "gemini-3-flash-preview"
+  realtime_analyzer.support_resistance: "gemini-3-flash-preview"
+  pattern_verifier: "gemini-3-flash-preview"
+  sentinel_capture: "gemini-2.5-flash"
+
+  # ─── OPENAI: 推理引擎 ───
+  # A/B test result: gpt-5.4 full (27.6%) WORSE than mini (33.3%) on trading
+  # Benchmark ≠ trading ability. Mini's simpler reasoning works better for trends.
+  # Cost: mini ~$1/day vs full ~$8/day for same or better accuracy.
+  ust_analysis: "openai:gpt-5.4-mini"
+  trading_advisor: "openai:gpt-5.4-mini"
+  trading_advisor.advise_stock: "openai:gpt-5.4-mini"
+  stock_analyzer.stock_analysis: "openai:gpt-5.4-mini"
+  debate: "deepseek:deepseek-chat"
+  debate.bull: "deepseek:deepseek-chat"
+  debate.bear: "deepseek:deepseek-chat"
+  debate.arbiter: "openai:o4-mini"
+  chain: "openai:o4-mini"
+  ust_debate: "openai:o4-mini"
+  final_decision: "openai:o4-mini"
+  deep_analyze: "openai:gpt-5.4"             # Full only for deep single-stock analysis
+
+# Caller fallback chain: if primary model/provider fails, try these in order.
+# Syntax: caller_prefix → [model1, model2, ...] — "provider:model" for cross-provider
+# Claude Code is LAST in every chain (preserve usage for development)
+caller_fallback_map:
+  # ═══════════════════════════════════════════════════════════════
+  # 三角 fallback: 每个 provider 失败 → 下一个最优替代
+  # Gemini失败→DeepSeek, DeepSeek失败→Gemini, OpenAI失败→DeepSeek→Gemini
+  # Claude Code 永远是最后兜底
+  # ═══════════════════════════════════════════════════════════════
+  # Gemini 扫描 → DeepSeek
+  ust_scan: ["deepseek:deepseek-chat"]
+  market_scan: ["deepseek:deepseek-chat"]
+  candidate_filter: ["deepseek:deepseek-chat"]
+  sentiment_scan: ["deepseek:deepseek-chat"]
+  screener: ["deepseek:deepseek-chat"]
+  review_agent: ["openai:o4-mini", "deepseek:deepseek-reasoner"]  # Full→o4-mini→DeepSeek reasoner
+  # DeepSeek 中文 → Gemini Flash
+  news_parse: ["gemini-3-flash-preview"]
+  intel_analysis: ["gemini-3-flash-preview"]
+  event_understanding: ["gemini-3-flash-preview"]
+  intel_analysis_pipeline: ["gemini-3-flash-preview"]
+  historical_analogy: ["gemini-3-flash-preview"]
+  # Gemini realtime_analyzer → DeepSeek (不走 claude_code)
+  realtime_analyzer.unified: ["deepseek:deepseek-chat", "openai:gpt-5.4-mini"]
+  realtime_analyzer.comprehensive: ["deepseek:deepseek-chat", "openai:gpt-5.4-mini"]
+  realtime_analyzer.deep: ["gemini-2.5-flash", "deepseek:deepseek-chat"]
+  realtime_analyzer.market_overview: ["deepseek:deepseek-chat"]
+  realtime_analyzer.quick: ["deepseek:deepseek-chat"]
+  sentinel_capture: ["deepseek:deepseek-chat"]
+  # DeepSeek 对话 → Gemini
+  conversation_service.followup: ["gemini-2.5-flash"]
+  agent_service.send_message: ["deepseek:deepseek-chat", "gemini-2.5-flash"]
+  sub_agent.research: ["gemini-3-flash-preview"]
+  debate.bull: ["gemini-3-flash-preview"]
+  debate.bear: ["gemini-3-flash-preview"]
+  # OpenAI 分析 → DeepSeek → Gemini Pro (不走 claude_code)
+  ust_analysis: ["deepseek:deepseek-chat", "gemini-2.5-pro"]
+  trading_advisor: ["openai:o4-mini", "deepseek:deepseek-reasoner"]  # Full→o4-mini→reasoner
+  stock_analyzer.stock_analysis: ["deepseek:deepseek-chat", "gemini-2.5-pro"]
+  # OpenAI 决策 → DeepSeek Reasoner → Gemini Pro → Claude Code
+  debate.arbiter: ["deepseek:deepseek-reasoner", "gemini-2.5-pro"]
+  chain: ["deepseek:deepseek-reasoner", "gemini-2.5-pro"]
+  ust_debate: ["deepseek:deepseek-reasoner", "gemini-2.5-pro"]
+  final_decision: ["openai:o4-mini", "deepseek:deepseek-reasoner"]  # Full→o4-mini→reasoner
+  deep_analyze: ["openai:o4-mini", "deepseek:deepseek-reasoner", "gemini-2.5-pro"]
+  debate: ["gemini-3-flash-preview", "gemini-2.5-flash"]
+
 upgrade_rules: {}
 
-# Gemini Grounding — Google Search augmentation for complete() calls.
-# Disabled — Gemini is no longer the primary provider.
 grounding:
   enabled: false
   enabled_callers:
@@ -103,14 +284,14 @@ grounding:
     - "intel_analysis"
   free_tier_daily_limit: 1500
 
-# Claude Code bridge (host-side service wrapping claude CLI)
+# Claude Code bridge — fallback provider via `claude -p` CLI
 claude_code_bridge:
-  url: "http://host.docker.internal:19821"  # Docker 内访问宿主机
-  host_url: "http://localhost:19821"         # 宿主机直接访问
+  url: "http://host.docker.internal:19821"
+  host_url: "http://localhost:19821"
   timeout: 900
-  model: "opus"  # alias — claude CLI 自动解析为最新 Opus 模型
+  model: "sonnet"  # Sonnet 4.6 — good balance of quality/speed/cost
   auto_route:
-    enabled: true
+    enabled: false
     min_message_length: 100
     keywords:
       - "深度分析"
@@ -126,26 +307,25 @@ claude_code_bridge:
       - "专家分析"
       - "深度模式"
     persona_mapping:
-      industry: "architect"     # 产业链/护城河/商业模式
-      ai_tech: "ai_architect"   # AI/算力/芯片
-      financial: "analyst"      # 估值/财报/基本面
-      quant: "quant"            # 因子/量化/回测
-      portfolio: "investor"     # 组合/仓位/风控
+      industry: "architect"
+      ai_tech: "ai_architect"
+      financial: "analyst"
+      quant: "quant"
+      portfolio: "investor"
       default: "analyst"
 
-# Persona definitions for chat threads
 personas:
   default:
     display_name: "默认助手"
     description: "通用 A 股投资分析助手"
-    backend: "claude_code"
+    backend: "google"
     icon: "default"
     system_prompt_overlay: ""
 
   architect:
     display_name: "架构师"
     description: "系统架构、产业链上下游、商业模式护城河分析"
-    backend: "claude_code"
+    backend: "google"
     icon: "architect"
     system_prompt_overlay: >-
       你同时具备专业架构师视角，擅长从系统架构、产业链上下游、
@@ -154,7 +334,7 @@ personas:
   ai_architect:
     display_name: "AI 架构师"
     description: "AI 技术栈、算力布局、数据资产价值评估"
-    backend: "claude_code"
+    backend: "google"
     icon: "ai"
     system_prompt_overlay: >-
       你同时具备 AI 架构师视角，擅长评估公司的 AI 技术栈、算力布局、
@@ -163,7 +343,7 @@ personas:
   analyst:
     display_name: "分析师"
     description: "财报深度拆解、行业比较、估值模型构建"
-    backend: "claude_code"
+    backend: "google"
     icon: "analyst"
     system_prompt_overlay: >-
       你同时具备资深分析师视角，擅长财报深度拆解、行业比较分析、
@@ -172,7 +352,7 @@ personas:
   quant:
     display_name: "量化分析师"
     description: "因子分析、统计套利、回测验证"
-    backend: "claude_code"
+    backend: "google"
     icon: "quant"
     system_prompt_overlay: >-
       你同时具备量化分析师视角，擅长因子分析、统计套利逻辑、
@@ -181,7 +361,7 @@ personas:
   investor:
     display_name: "专业投资者"
     description: "组合配置、仓位管理、风险控制、择时策略"
-    backend: "claude_code"
+    backend: "google"
     icon: "investor"
     system_prompt_overlay: >-
       你同时具备专业投资者视角，擅长组合配置、仓位管理、
@@ -189,17 +369,16 @@ personas:
 
 routing:
   default_strategy: "quality"
-  timeout_per_provider: 900
-  timeout_total: 1200
+  timeout_per_provider: 300
+  timeout_total: 600
   fallback_acquire_timeout: 30
   hybrid_weights:
     cost: 0.4
     quality: 0.6
   fallback_order:
-    - "claude_code"
-    - "google"
-    - "anthropic"
-    - "openai"
+    - "google"       # free scanning tier
+    - "deepseek"     # cheap Chinese NLP
+    - "openai"       # reasoning engine
 
 consensus:
   enabled: false
@@ -209,6 +388,22 @@ consensus:
     openai: 0.35
     google: 0.25
   agreement_threshold: 0.6
+
+budget:
+  daily_limits:
+    google: 5000
+    openai: 2000
+    deepseek: 3000
+  per_minute_limits:
+    google: 100
+    openai: 60
+    deepseek: 60
+  model_daily_limits:
+    gemini-3.1-pro-preview: 250      # HARD LIMIT — 250 RPD
+    gemini-3-flash-preview: 5000
+    gemini-3.1-flash-lite-preview: 50000
+    gemini-2.5-pro: 500       # fallback only
+    gemini-2.5-flash: 2000    # judge only
 
 key_storage:
   method: "encrypted_file"

@@ -58,19 +58,24 @@ def _build_advisor_system_prompt(board_type: str = "", price_limit: str = "") ->
         f"{RISK_ACTION_MATRIX}\n\n"
         f"{DATA_INJECTION_RULES}\n\n"
         f"{board_constraint}\n\n"
-        "### 操作建议枚举\n"
-        "- buy: 建议建仓买入 (新仓)\n"
-        "- add: 建议加仓 (已持有)\n"
-        "- hold: 建议持有等待\n"
-        "- reduce: 建议减仓\n"
-        "- sell: 建议清仓卖出\n"
-        "- watch: 暂时观望，等待更明确信号\n\n"
-        "你必须严格按照JSON格式输出，不要添加任何多余文字。\n\n"
-        "**关键约束**：\n"
-        "- target_price 的 low/high 必须基于注入的行情数据和技术位推导，禁止凭空编造\n"
-        "- stop_loss 必须 < 当前价格（做多场景），基于关键支撑位\n"
-        "- 所有数字（价格、涨跌幅、资金流）必须直接引用系统注入数据，禁止编造\n"
-        "- data_references 必须 ≥ 3 条，每条引用注入数据中的具体数值\n\n"
+        "### Action enum\n"
+        "- buy: recommend opening a new position\n"
+        "- add: recommend adding to an existing position\n"
+        "- hold: recommend holding and waiting\n"
+        "- reduce: recommend reducing position\n"
+        "- sell: recommend closing the entire position\n"
+        "- watch: stay on the sidelines, wait for clearer signals\n\n"
+        "**Key constraints**:\n"
+        "- target_price low/high MUST be derived from injected quote data and "
+        "technical levels — do NOT fabricate values\n"
+        "- stop_loss MUST be < current price (long-only scenario), based on "
+        "key support levels\n"
+        "- All numbers (prices, change %, capital flow) MUST be cited directly "
+        "from system-injected data — do NOT fabricate\n"
+        "- data_references MUST contain >= 3 entries, each citing a specific "
+        "value from the injected data\n\n"
+        "Write all output text in Chinese.\n"
+        "Output STRICTLY in the following JSON format with no extra text.\n\n"
         "```json\n"
         "{\n"
         '  "action": "buy | add | hold | reduce | sell | watch",\n'
@@ -222,7 +227,7 @@ class TradingAdvisor:
             indicators or {}, strategy_signals or {}, bayesian_analysis or {}
         )
         quant_lines = [
-            "\n### 量化信号 (系统预计算 — 请引用，不要重新计算)",
+            "\n### 量化信号 (system pre-computed — cite these, do NOT recalculate)",
             f"技术评分: {precomputed_quant.get('technical_score', 'N/A')}",
             f"动量评分: {precomputed_quant.get('momentum_score', 'N/A')}",
             f"策略共识: {precomputed_quant.get('strategy_consensus', 'N/A')}",
@@ -449,9 +454,12 @@ class TradingAdvisor:
         prompt_text = "\n".join(prompt_sections)
 
         holiday_system = (
-            "你是A股假期持仓风险评估专家。根据假期期间全球市场变动、相关新闻舆情、"
-            "跨市场关联，评估持仓股票在节后开盘的可能影响。\n\n"
-            "严格按照JSON格式输出：\n"
+            "You are an A-share holiday position risk assessment expert. "
+            "Based on global market movements during the holiday, relevant "
+            "news sentiment, and cross-market correlations, assess the likely "
+            "impact on held stocks when the market reopens after the holiday.\n\n"
+            "Write all output text in Chinese.\n"
+            "Output STRICTLY in the following JSON format:\n"
             "```json\n"
             "{\n"
             '  "impact_score": 0.0 ~ 1.0,\n'
@@ -557,9 +565,12 @@ class TradingAdvisor:
         prompt_text = "\n".join(prompt_sections)
 
         briefing_system = (
-            "你是A股开盘前综合研判分析师。基于假期期间全球市场表现、重要新闻、"
-            "用户持仓情况，生成节后开盘研判报告。\n\n"
-            "严格按照JSON格式输出：\n"
+            "You are an A-share pre-open comprehensive research analyst. "
+            "Based on global market performance during the holiday, key news, "
+            "and user position data, generate a post-holiday market-open "
+            "research briefing.\n\n"
+            "Write all output text in Chinese.\n"
+            "Output STRICTLY in the following JSON format:\n"
             "```json\n"
             "{\n"
             '  "market_outlook": "bullish | bearish | neutral",\n'
@@ -890,10 +901,11 @@ class TradingAdvisor:
 
 def _format_quote(quote: dict[str, Any] | None) -> str:
     if not quote:
-        return "无实时行情数据"
+        return "无行情数据（实时源和收盘价均不可用）"
+    source_tag = "（收盘价）" if quote.get("_source") == "eod_fallback" else ""
     parts = []
     if quote.get("price") is not None:
-        parts.append(f"最新价: {quote['price']}")
+        parts.append(f"最新价{source_tag}: {quote['price']}")
     if quote.get("pct_change") is not None:
         parts.append(f"涨跌幅: {quote['pct_change']}%")
     if quote.get("volume") is not None:
@@ -902,7 +914,7 @@ def _format_quote(quote: dict[str, Any] | None) -> str:
         parts.append(f"最高: {quote['high']}")
     if quote.get("low") is not None:
         parts.append(f"最低: {quote['low']}")
-    return " | ".join(parts) if parts else "无实时行情数据"
+    return " | ".join(parts) if parts else "无行情数据"
 
 
 def _format_indicators(indicators: dict[str, Any] | None) -> str:

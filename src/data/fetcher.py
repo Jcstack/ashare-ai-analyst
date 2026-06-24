@@ -7,10 +7,12 @@ config/stocks.yaml -- no hardcoded stock codes, dates, or params.
 Per PRD FR-D001: Config-driven data collection via AKShare.
 """
 
+from __future__ import annotations
+
 import os
 import time
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -138,6 +140,60 @@ class StockDataFetcher:
         # Track the last request timestamp for rate-limiting
         self._last_request_ts: float = 0.0
 
+        # Lazy trading calendar (initialized on first cache freshness check)
+        self.__trading_cal: Any = None
+
+    @property
+    def _trading_cal(self):
+        """Lazily initialize TradingCalendar for cache freshness checks."""
+        if self.__trading_cal is None:
+            from src.data.trading_calendar import TradingCalendar
+
+            self.__trading_cal = TradingCalendar()
+        return self.__trading_cal
+
+    def _expected_latest_trading_day(self, now: datetime | None = None) -> date:
+        """Return the expected latest trading day that data sources should have.
+
+        Time-aware logic:
+        - During trading hours (before 15:00): previous trading day
+          (today's data isn't finalized yet).
+        - After market close (15:00+) on a trading day: today.
+        - Non-trading day (weekend/holiday): most recent past trading day.
+
+        Args:
+            now: Current datetime (default: ``datetime.now()``).
+
+        Returns:
+            The ``date`` that the most recent available data should cover.
+        """
+        if now is None:
+            now = datetime.now()
+        today = now.date()
+
+        from src.data.trading_calendar import MarketSession
+
+        session = self._trading_cal.current_session(now)
+        is_today_trading = self._trading_cal.is_trading_day(today)
+
+        if is_today_trading:
+            if (
+                session
+                in (
+                    MarketSession.AFTER_HOURS,
+                    MarketSession.CLOSED,
+                )
+                and now.hour >= 15
+            ):
+                # After market close — today's data should be available
+                return today
+            else:
+                # During trading hours or before open — previous day's data
+                return self._trading_cal.prev_trading_day(today)
+        else:
+            # Weekend / holiday — most recent past trading day
+            return self._trading_cal.prev_trading_day(today)
+
     # ------------------------------------------------------------------
     # Public methods
     # ------------------------------------------------------------------
@@ -153,6 +209,36 @@ class StockDataFetcher:
             except Exception:
                 pass
 
+    def _check_data_freshness(self, df: pd.DataFrame, symbol: str, source: str) -> bool:
+        """Check if fetched data has up-to-date rows.
+
+        Uses the trading calendar to determine the expected latest trading
+        day (time-aware) and allows a tolerance of
+        ``staleness_max_trading_days`` (default 1) trading days for data
+        publication delay.
+
+        Returns:
+            ``True`` if data is fresh enough, ``False`` if stale.
+        """
+        if df.empty or "date" not in df.columns:
+            return False
+        last_date = pd.to_datetime(df["date"].iloc[-1]).date()
+        tolerance = int(self._cache_cfg.get("staleness_max_trading_days", 1))
+        expected = self._expected_latest_trading_day()
+        # Allow tolerance trading days of delay from the expected date
+        cutoff = self._trading_cal.prev_trading_day(d=expected, n=tolerance)
+        if last_date < cutoff:
+            self.logger.warning(
+                "%s data stale for %s (last=%s, expected=%s, cutoff=%s)",
+                source,
+                symbol,
+                last_date.isoformat(),
+                expected.isoformat(),
+                cutoff.isoformat(),
+            )
+            return False
+        return True
+
     def fetch_daily_ohlcv(
         self,
         symbol: str,
@@ -161,10 +247,14 @@ class StockDataFetcher:
     ) -> pd.DataFrame:
         """Fetch daily OHLCV data for a single A-share stock.
 
-        Source chain: QMT (local cache) → Tencent → EastMoney → adata.
+        Source chain: QMT (local) → EastMoney (direct+proxy) → Tencent → adata.
+        Each source is checked for data freshness using the trading calendar.
+        If all sources return stale data, the freshest result is returned
+        with a critical warning logged.
 
         Args:
             symbol: 6-digit stock code (e.g. ``"000001"``).
+                    Exchange suffixes (.SZ/.SH) are stripped automatically.
             start_date: Start date ``YYYYMMDD``. Falls back to config value.
             end_date: End date ``YYYYMMDD``. Empty string means today.
 
@@ -175,6 +265,13 @@ class StockDataFetcher:
         Raises:
             DataCollectionError: If the request fails after all retries.
         """
+        # Strip exchange prefix/suffix: sh600026→600026, 000001.SZ→000001
+        import re as _re
+
+        symbol = _re.sub(r"\.(SZ|SH|BJ)$", "", symbol, flags=_re.IGNORECASE)
+        if len(symbol) > 6 and symbol[:2].lower() in ("sh", "sz", "bj"):
+            symbol = symbol[2:]
+
         start = start_date or self._daily_cfg.get("start_date", "20240101")
         end = end_date or self._daily_cfg.get("end_date", "")
         adjust = self._daily_cfg.get("adjust", "qfq")
@@ -192,24 +289,63 @@ class StockDataFetcher:
             adjust,
         )
 
+        # Track best stale result across sources so we can return the
+        # freshest data even when all sources are behind.
+        best_stale: pd.DataFrame | None = None
+        best_stale_date: Any = None
+
+        def _track_stale(df: pd.DataFrame) -> None:
+            nonlocal best_stale, best_stale_date
+            if df is not None and not df.empty and "date" in df.columns:
+                ld = pd.to_datetime(df["date"].iloc[-1])
+                if best_stale_date is None or ld > best_stale_date:
+                    best_stale = df
+                    best_stale_date = ld
+
         # QMT primary source (local data, zero network latency)
         self.__init_qmt_adapter()
         if self._qmt and self._qmt.is_available():
             try:
                 df = self._qmt.get_daily_ohlcv(symbol, start, end)
                 if df is not None and not df.empty:
-                    self._save_cache(df, cache_path)
-                    return df
+                    if self._check_data_freshness(df, symbol, "QMT"):
+                        self._save_cache(df, cache_path)
+                        return df
+                    _track_stale(df)
             except Exception as exc:
                 self.logger.warning(
-                    "QMT daily OHLCV failed for %s: %s, trying Tencent",
+                    "QMT daily OHLCV failed for %s: %s, trying EastMoney",
                     symbol,
                     exc,
                 )
 
-        # Tencent secondary source (ak.stock_zh_a_hist_tx)
-        # Tencent is preferred because East Money push2 domains are blocked
-        # by some proxy configurations (e.g. Surge Network Extension).
+        # EastMoney secondary source (ak.stock_zh_a_hist via em_api_call)
+        # Handles direct-first-then-proxy-patch-fallback internally.
+        try:
+            kwargs: dict[str, Any] = {
+                "symbol": symbol,
+                "period": "daily",
+                "start_date": start,
+                "adjust": adjust,
+            }
+            if end:
+                kwargs["end_date"] = end
+
+            df = self._request_with_retry(
+                ak.stock_zh_a_hist, use_em_proxy=True, **kwargs
+            )
+            df = df.rename(columns=OHLCV_COLUMN_MAP)
+            if self._check_data_freshness(df, symbol, "EastMoney"):
+                self._save_cache(df, cache_path)
+                return df
+            _track_stale(df)
+        except DataCollectionError:
+            self.logger.warning(
+                "EastMoney source failed for %s, trying Tencent fallback",
+                symbol,
+            )
+
+        # Fallback source 1: Tencent (ak.stock_zh_a_hist_tx)
         try:
             tx_symbol = self._to_tx_symbol(symbol)
             tx_kwargs: dict[str, Any] = {
@@ -226,52 +362,39 @@ class StockDataFetcher:
             if "volume" not in df.columns and "amount" in df.columns:
                 df = df.rename(columns={"amount": "volume"})
 
-            # Freshness check: if the last row is > 3 calendar days old,
-            # the source may be lagging (e.g. Tencent after holidays).
-            # Try the next source instead of caching stale data.
-            if not df.empty and "date" in df.columns:
-                last_date = pd.to_datetime(df["date"].iloc[-1])
-                if (datetime.now() - last_date).days > 3:
-                    self.logger.warning(
-                        "Tencent data stale for %s (last=%s), trying fallback",
-                        symbol,
-                        last_date.strftime("%Y-%m-%d"),
-                    )
-                    raise DataCollectionError(f"Tencent data stale: last={last_date}")
-
-            self._save_cache(df, cache_path)
-            return df
+            if self._check_data_freshness(df, symbol, "Tencent"):
+                self._save_cache(df, cache_path)
+                return df
+            _track_stale(df)
         except DataCollectionError:
             self.logger.warning(
-                "Tencent source failed for %s, trying East Money fallback",
-                symbol,
-            )
-
-        # Fallback source 1: East Money (ak.stock_zh_a_hist)
-        try:
-            kwargs: dict[str, Any] = {
-                "symbol": symbol,
-                "period": "daily",
-                "start_date": start,
-                "adjust": adjust,
-            }
-            if end:
-                kwargs["end_date"] = end
-
-            df = self._request_with_retry(
-                ak.stock_zh_a_hist, use_em_proxy=True, **kwargs
-            )
-            df = df.rename(columns=OHLCV_COLUMN_MAP)
-            self._save_cache(df, cache_path)
-            return df
-        except DataCollectionError:
-            self.logger.warning(
-                "East Money source failed for %s, trying adata fallback",
+                "Tencent source failed for %s, trying adata fallback",
                 symbol,
             )
 
         # Fallback source 2: adata (multi-source fusion, proxy-friendly)
-        return self._fetch_daily_via_adata(symbol, start, end, adjust, cache_path)
+        try:
+            df = self._fetch_daily_via_adata(symbol, start, end, adjust, cache_path)
+            if self._check_data_freshness(df, symbol, "adata"):
+                return df  # _fetch_daily_via_adata already saves cache
+            _track_stale(df)
+        except DataCollectionError:
+            self.logger.warning("adata source also failed for %s", symbol)
+
+        # All sources returned stale data — use the freshest one but warn
+        if best_stale is not None:
+            self.logger.critical(
+                "ALL sources returned stale data for %s (freshest=%s). "
+                "Trading decisions based on this data may be inaccurate!",
+                symbol,
+                best_stale_date,
+            )
+            self._save_cache(best_stale, cache_path)
+            return best_stale
+
+        raise DataCollectionError(
+            f"All data sources failed for {symbol} — no data available"
+        )
 
     def fetch_fundamental(self, symbol: str) -> pd.DataFrame:
         """Fetch basic financial metrics for a single A-share stock.
@@ -450,7 +573,12 @@ class StockDataFetcher:
         return df
 
     def fetch_all_watchlist(self) -> dict[str, pd.DataFrame]:
-        """Fetch daily OHLCV for every stock in the configured watchlist.
+        """Fetch daily OHLCV for every stock on the watchlist + portfolio.
+
+        Reads from SQLite ``WatchlistService`` (the live watchlist) and
+        merges in any portfolio positions so held stocks are always
+        fetched.  Falls back to ``config/stocks.yaml`` only if both
+        SQLite sources are empty.
 
         Respects the ``request.interval_seconds`` setting between
         consecutive network calls to avoid overwhelming the data source.
@@ -458,7 +586,44 @@ class StockDataFetcher:
         Returns:
             Dictionary mapping symbol codes to their OHLCV DataFrames.
         """
-        watchlist: list[dict[str, str]] = self.config.get("watchlist", [])
+        watchlist: list[dict[str, str]] = []
+
+        # 1. Read from SQLite WatchlistService (primary source)
+        try:
+            from src.web.services.watchlist_service import WatchlistService
+
+            wl_svc = WatchlistService()
+            watchlist = wl_svc.list_all()
+        except Exception as exc:
+            self.logger.warning("Could not read SQLite watchlist: %s", exc)
+
+        # 2. Merge portfolio positions so held stocks are always fetched
+        try:
+            from src.web.services.portfolio_store import PortfolioStore
+
+            store = PortfolioStore(capital_service=None)
+            positions = store.list_positions()
+            existing_symbols = {item["symbol"] for item in watchlist}
+            for pos in positions:
+                sym = pos.get("symbol", "")
+                if sym and sym not in existing_symbols:
+                    watchlist.append(
+                        {
+                            "symbol": sym,
+                            "name": pos.get("name", sym),
+                            "board": pos.get("board", "main"),
+                        }
+                    )
+                    existing_symbols.add(sym)
+        except Exception as exc:
+            self.logger.warning(
+                "Could not read portfolio positions for watchlist merge: %s", exc
+            )
+
+        # 3. Fallback to YAML config if both SQLite sources are empty
+        if not watchlist:
+            watchlist = self.config.get("watchlist", [])
+
         if not watchlist:
             self.logger.warning("Watchlist is empty; nothing to fetch")
             return {}
@@ -959,7 +1124,8 @@ class StockDataFetcher:
         """Check whether a cache file exists, is within TTL, AND is fresh.
 
         Validates both file age (mtime < ttl_hours) and data freshness
-        (last date in a ``date`` column, if present, is within 3 days).
+        using the trading calendar: the last date in a ``date`` column must
+        be within ``staleness_max_trading_days`` trading days of today.
         This prevents returning stale data after holidays or source outages
         when the file was rewritten but the source had no new data.
 
@@ -981,17 +1147,21 @@ class StockDataFetcher:
         if (datetime.now() - file_mtime) >= timedelta(hours=ttl_hours):
             return False
 
-        # Data-level freshness: if parquet has a "date" column, reject
-        # when the last date is > 3 calendar days old (handles holiday gaps
-        # where the file was refreshed but the source returned stale data).
+        # Data-level freshness: use trading calendar to check if the last
+        # date in the data is within tolerance of the expected latest day.
+        tolerance = int(self._cache_cfg.get("staleness_max_trading_days", 1))
         try:
             cached_df = pd.read_parquet(cache_path)
             if "date" in cached_df.columns and not cached_df.empty:
-                last_date = pd.to_datetime(cached_df["date"].iloc[-1])
-                if (datetime.now() - last_date).days > 3:
+                last_date = pd.to_datetime(cached_df["date"].iloc[-1]).date()
+                expected = self._expected_latest_trading_day()
+                cutoff = self._trading_cal.prev_trading_day(d=expected, n=tolerance)
+                if last_date < cutoff:
                     self.logger.info(
-                        "Cache data stale (last=%s): %s",
-                        last_date.strftime("%Y-%m-%d"),
+                        "Cache data stale (last=%s, expected=%s, cutoff=%s): %s",
+                        last_date.isoformat(),
+                        expected.isoformat(),
+                        cutoff.isoformat(),
                         cache_path.name,
                     )
                     return False
@@ -1291,6 +1461,178 @@ class StockDataFetcher:
             return df
 
         return pd.DataFrame()
+
+    def fetch_intraday_fund_flow_series(
+        self, symbol: str, sample_minutes: int = 30
+    ) -> list[dict]:
+        """Fetch intraday fund-flow time series (sampled at *sample_minutes* intervals).
+
+        Returns a list of dicts with ``time``, ``main_net``, and per-order-size
+        breakdowns so the LLM can see the capital-flow trajectory across the
+        trading day — not just the latest snapshot.
+
+        Source chain:
+        1. EastMoney push2 API via em_api_call (minute-level kline).
+        2. adata ``get_capital_flow_min`` fallback.
+
+        Args:
+            symbol: 6-digit stock code.
+            sample_minutes: Interval in minutes for sampling (default 30).
+
+        Returns:
+            List of dicts ordered by time, each containing:
+            ``time`` (HH:MM), ``main_net``, ``super_large_net``, ``large_net``,
+            ``medium_net``, ``small_net``.  Empty list on failure.
+        """
+        cache_key = f"fund_flow_series_{symbol}"
+        cached = self._get_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        min_df = self._fetch_fund_flow_min_eastmoney(symbol)
+
+        # Fallback to adata if EastMoney direct failed
+        if min_df is None or min_df.empty:
+            min_df = self._fetch_fund_flow_min_adata(symbol)
+
+        if min_df is None or min_df.empty:
+            return []
+
+        # Ensure we have a time column
+        time_col = None
+        for col in ("trade_time", "trade_date"):
+            if col in min_df.columns:
+                time_col = col
+                break
+        if time_col is None:
+            return []
+
+        # Parse timestamps and sample at intervals
+        min_df = min_df.copy()
+        min_df["_ts"] = pd.to_datetime(min_df[time_col], errors="coerce")
+        min_df = min_df.dropna(subset=["_ts"]).sort_values("_ts")
+        if min_df.empty:
+            return []
+
+        # Sample: keep first, then every sample_minutes, plus last
+        sampled_indices = [0]
+        last_kept = min_df["_ts"].iloc[0]
+        interval = pd.Timedelta(minutes=sample_minutes)
+        for i in range(1, len(min_df)):
+            if min_df["_ts"].iloc[i] - last_kept >= interval:
+                sampled_indices.append(i)
+                last_kept = min_df["_ts"].iloc[i]
+        # Always include the last row (latest data point)
+        if sampled_indices[-1] != len(min_df) - 1:
+            sampled_indices.append(len(min_df) - 1)
+
+        sampled = min_df.iloc[sampled_indices]
+
+        result = []
+        for _, row in sampled.iterrows():
+            result.append(
+                {
+                    "time": row["_ts"].strftime("%H:%M"),
+                    "main_net": float(row.get("main_net_inflow", 0)),
+                    "super_large_net": float(row.get("max_net_inflow", 0)),
+                    "large_net": float(row.get("lg_net_inflow", 0)),
+                    "medium_net": float(row.get("mid_net_inflow", 0)),
+                    "small_net": float(row.get("sm_net_inflow", 0)),
+                }
+            )
+        self._set_cache(cache_key, result, ttl=120)
+        return result
+
+    def _fetch_fund_flow_min_eastmoney(self, symbol: str) -> pd.DataFrame | None:
+        """Fetch minute-level fund flow directly from EastMoney push2 API.
+
+        Uses em_api_call for proxy-patch fallback.  Returns a DataFrame with
+        columns: trade_time, main_net_inflow, sm_net_inflow, mid_net_inflow,
+        lg_net_inflow, max_net_inflow.
+        """
+        import requests as _requests
+
+        from src.data.eastmoney_proxy import em_api_call
+
+        cid = 1 if symbol.startswith("6") else 0
+
+        def _call() -> dict:
+            url = (
+                f"https://push2.eastmoney.com/api/qt/stock/fflow/kline/get"
+                f"?lmt=0&klt=1"
+                f"&fields1=f1,f2,f3,f7"
+                f"&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,"
+                f"f61,f62,f63,f64,f65"
+                f"&secid={cid}.{symbol}"
+            )
+            resp = _requests.get(url, timeout=15)
+            return resp.json()
+
+        try:
+            self._polite_sleep()
+            data = em_api_call(_call)
+            if not isinstance(data, dict):
+                return None
+            inner = data.get("data")
+            if not inner or "klines" not in inner:
+                return None
+            klines = inner["klines"]
+            if not klines:
+                return None
+
+            columns = [
+                "trade_time",
+                "main_net_inflow",
+                "sm_net_inflow",
+                "mid_net_inflow",
+                "lg_net_inflow",
+                "max_net_inflow",
+            ]
+            rows = []
+            for line in klines:
+                parts = line.split(",")
+                if len(parts) >= 6:
+                    rows.append(parts[:6])
+            if not rows:
+                return None
+
+            df = pd.DataFrame(rows, columns=columns)
+            df["trade_time"] = pd.to_datetime(df["trade_time"], errors="coerce")
+            for c in columns[1:]:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+            return df
+        except Exception as exc:
+            self.logger.warning(
+                "EastMoney push2 minute fund flow failed for %s: %s",
+                symbol,
+                exc,
+            )
+            return None
+
+    def _fetch_fund_flow_min_adata(self, symbol: str) -> pd.DataFrame | None:
+        """Fallback: fetch minute-level fund flow via adata library."""
+        if not _HAS_ADATA:
+            return None
+
+        import adata as _ad
+
+        for source_name, source_fn in [
+            ("default", _ad.stock.market.get_capital_flow_min),
+            ("baidu", _ad.stock.market.baidu_capital_flow.get_capital_flow_min),
+        ]:
+            try:
+                with _bypass_proxy():
+                    min_df = source_fn(stock_code=symbol)
+                if min_df is not None and not min_df.empty:
+                    return min_df
+            except Exception as exc:
+                self.logger.warning(
+                    "adata %s minute fund flow failed for %s: %s",
+                    source_name,
+                    symbol,
+                    exc,
+                )
+        return None
 
     def fetch_intraday_fund_flow(self, symbol: str) -> pd.DataFrame:
         """Fetch today's real-time fund-flow for a stock.

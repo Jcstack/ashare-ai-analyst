@@ -1,39 +1,41 @@
 # Data collection (数据采集)
-akshare>=1.12.0
-akshare-proxy-patch>=0.5.0
-curl-cffi>=0.13.0
+akshare>=1.18.0
+akshare-proxy-patch>=0.2.13
+curl-cffi>=0.7,<0.14  # yfinance 1.2.0 requires <0.14
 adata>=2.9.0
-pandas>=2.0.0
-numpy>=1.24.0
-pyarrow>=24.0.0
+pandas>=2.2.0,<3.1
+numpy>=1.26.0,<2.5
+pyarrow>=14.0.0
 
 # AI Core (多模型分析预测)
 anthropic>=0.40.0
 openai>=1.40.0
 google-genai>=1.0.0
+playwright>=1.49.0
+greenlet>=3.1.1,<4.0.0
 
 # Encryption (密钥加密存储)
-cryptography>=42.0.0
+cryptography>=44.0.0
 
 # Technical analysis (技术分析)
 ta>=0.11.0
 
 # Visualization (可视化)
-matplotlib>=3.7.0
-plotly>=5.15.0
+matplotlib>=3.9.0
+plotly>=5.24.0
 
 # Backtesting (策略回测)
 backtrader>=1.9.78
 
 # Task queue (任务调度)
-celery[redis]>=5.3.0
+celery[redis]>=5.4.0
 redis>=5.0.0
 
 # Notification (通知)
 requests>=2.31.0
 
 # Global market data (全球行情)
-yfinance>=0.2.36
+yfinance>=1.2.0
 
 # RSS parsing (情报中心)
 feedparser>=6.0.0
@@ -42,19 +44,25 @@ feedparser>=6.0.0
 ddgs>=7.0.0
 
 # Configuration (配置管理)
-pyyaml>=6.0
+pyyaml>=6.0.2
 python-dotenv>=1.0.0
 
 # Web API (FastAPI + React SPA)
-fastapi>=0.137.1
-uvicorn[standard]>=0.27.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
 gunicorn>=22.0.0
 python-multipart>=0.0.6
 sse-starlette>=1.8.2
 aiofiles>=23.2.1
 
 # Discord bot (移动指挥中心)
-discord.py>=2.7.1
+discord.py>=2.3.0
+
+# HMM regime detection (市场状态识别)
+hmmlearn>=0.3.0
+
+# Knowledge graph (世界模型)
+networkx>=3.0
 
 # Quantitative prediction (量化预测, optional)
 # qlib>=0.9.0  # Optional: pip install qlib (heavy deps, not in Docker)
