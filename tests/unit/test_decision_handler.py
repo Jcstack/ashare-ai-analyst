@@ -195,6 +195,9 @@ class TestStoreThesis:
     def test_store_thesis_buy(self, mock_web_deps):
         """Buy decision should store thesis in Redis."""
         mock_redis = MagicMock()
+        # No pre-existing thesis: store must not be skipped by the
+        # never-overwrite guard (first buy is the master plan).
+        mock_redis.get.return_value = None
         mock_web_deps.get_redis.return_value = mock_redis
 
         DecisionHandler._store_thesis(
@@ -219,6 +222,8 @@ class TestStoreThesis:
     def test_store_thesis_truncates_summary(self, mock_web_deps):
         """Summary should be truncated to 200 chars."""
         mock_redis = MagicMock()
+        # No pre-existing thesis so the store path actually runs.
+        mock_redis.get.return_value = None
         mock_web_deps.get_redis.return_value = mock_redis
         long_summary = "X" * 300
 
@@ -255,6 +260,9 @@ class TestThesisTargetPriceGuard:
         s = MagicMock(spec=AgentState)
         s.add_decision = MagicMock()
         s.add_finding = MagicMock()
+        # The same-day consistency guard reads state.decisions directly;
+        # a spec'd MagicMock does not expose dataclass fields, so set it.
+        s.decisions = []
         return s
 
     @pytest.mark.asyncio()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from src.agent_loop.agent_state import AgentState
@@ -40,9 +40,18 @@ class TestSelectMission:
         assert result == "morning_plan"
 
     def test_select_mission_portfolio_watch(self):
-        """10:00 (minute < 5) should pick portfolio_watch (deep, hourly)."""
+        """10:00 (minute < 5) with held positions → portfolio_watch (deep, hourly).
+
+        portfolio_watch is the deep持仓检查 path, which only applies when the
+        portfolio is non-empty; an empty portfolio hunts for opportunities
+        instead. Inject a portfolio store with a held position so the
+        has-positions branch is exercised.
+        """
         state = _make_state(heartbeat_count=3)
-        result = _select_mission(_cst_time(10, 0), state)
+        mock_ps = MagicMock()
+        mock_ps.list_positions.return_value = [{"symbol": "002688"}]
+        with patch("src.web.dependencies.get_portfolio_store", return_value=mock_ps):
+            result = _select_mission(_cst_time(10, 0), state)
         assert result == "portfolio_watch"
 
     def test_select_mission_opportunity_hunt(self):

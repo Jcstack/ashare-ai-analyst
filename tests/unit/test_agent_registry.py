@@ -161,19 +161,22 @@ class TestAgentRegistry:
 
     @patch("src.agents.registry.load_config")
     def test_bootstrap_creates_agents(self, mock_load):
+        # bootstrap() builds agents from a fixed catalogue of known specialist
+        # classes, creating one only when the config declares a matching
+        # capability. Use real catalogue names so the intersection is non-empty.
         mock_load.return_value = {
             "master": {"max_tokens_per_request": 4096},
             "agents": {
-                "analyst": {
-                    "description": "Analyst",
-                    "system_role": "You are an analyst",
+                "data_qa": {
+                    "description": "Data QA",
+                    "system_role": "You are a data quality gatekeeper",
                     "tools": ["get_realtime_quote"],
                     "max_tokens_per_request": 3072,
                 },
-                "risk": {
-                    "description": "Risk",
-                    "system_role": "You are risk",
-                    "tools": ["get_portfolio"],
+                "sentiment": {
+                    "description": "Sentiment",
+                    "system_role": "You are a sentiment analyst",
+                    "tools": ["get_trending_news"],
                     "max_tokens_per_request": 2048,
                 },
                 "trader": {
@@ -183,10 +186,10 @@ class TestAgentRegistry:
                     "max_tokens_per_request": 1024,
                     "use_llm": False,
                 },
-                "research": {
-                    "description": "Research",
-                    "system_role": "Researcher",
-                    "tools": ["get_trending_news"],
+                "regime": {
+                    "description": "Regime",
+                    "system_role": "You are a market regime analyst",
+                    "tools": ["get_portfolio"],
                     "max_tokens_per_request": 3072,
                 },
             },
@@ -209,10 +212,10 @@ class TestAgentRegistry:
         )
 
         assert len(registry.list_agents()) == 4
-        assert registry.get("analyst") is not None
-        assert registry.get("risk") is not None
+        assert registry.get("data_qa") is not None
+        assert registry.get("sentiment") is not None
         assert registry.get("trader") is not None
-        assert registry.get("research") is not None
+        assert registry.get("regime") is not None
 
     @patch("src.agents.registry.load_config")
     def test_multiple_capabilities_parsed(self, mock_load):

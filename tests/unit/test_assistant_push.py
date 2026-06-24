@@ -186,7 +186,7 @@ class TestRateLimiter:
     def test_allows_up_to_limit(self):
         from src.discord_bot.cogs.assistant_push import _RateLimiter
 
-        limiter = _RateLimiter(max_per_day=2)
+        limiter = _RateLimiter(max_per_symbol=2)
         assert limiter.allow("600519") is True
         assert limiter.allow("600519") is True
         assert limiter.allow("600519") is False
@@ -194,7 +194,7 @@ class TestRateLimiter:
     def test_different_symbols_independent(self):
         from src.discord_bot.cogs.assistant_push import _RateLimiter
 
-        limiter = _RateLimiter(max_per_day=1)
+        limiter = _RateLimiter(max_per_symbol=1)
         assert limiter.allow("600519") is True
         assert limiter.allow("000001") is True
         assert limiter.allow("600519") is False
@@ -203,6 +203,6 @@ class TestRateLimiter:
         """Empty symbol string bypasses rate limiting in the cog."""
         from src.discord_bot.cogs.assistant_push import _RateLimiter
 
-        limiter = _RateLimiter(max_per_day=1)
+        limiter = _RateLimiter(max_per_symbol=1)
         # Empty string is a valid key but the cog skips rate check for it
         assert limiter.allow("") is True

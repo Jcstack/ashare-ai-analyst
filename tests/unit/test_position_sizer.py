@@ -93,6 +93,11 @@ class TestCalculateSize:
             avg_win=0.20,
             avg_loss=0.02,
             realized_vol=0.05,
+            # High conviction (strong R/R + confidence) pushes the conviction
+            # multiplier to its 2.0 ceiling, so the raw weight far exceeds the
+            # 30% cap and the single-position cap must engage.
+            rr_ratio=4.0,
+            current_confidence=0.9,
         )
         assert result.recommended_weight <= 0.30
         assert result.capped is True

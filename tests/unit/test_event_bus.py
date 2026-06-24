@@ -65,7 +65,7 @@ class TestResolveRedisUrl:
         assert url == "redis://real:6379/2"
 
     def test_missing_key_defaults(self):
-        assert _resolve_redis_url({}) == "redis://localhost:6379/0"
+        assert _resolve_redis_url({}) == "redis://redis:6379/0"
 
 
 # ---------------------------------------------------------------------------

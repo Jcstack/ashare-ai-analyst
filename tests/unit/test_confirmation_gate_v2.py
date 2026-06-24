@@ -127,11 +127,14 @@ class TestSignalConfirmationGate:
         assert len(result.confirmation_sources) == 1
 
     def test_get_rules(self):
-        """Verify returns dict with all 11 signal types."""
+        """Verify returns dict with all configured signal-type rules."""
         gate = SignalConfirmationGate()
 
         rules = gate.get_rules()
 
+        # The default rule set covers every rule-bearing signal type
+        # (S10_BLACK_SWAN has no explicit rule and falls back to the default
+        # threshold inside check()).
         assert len(rules) == 11
         # Spot-check known rules
         assert rules["S1_TREND"] == 2
@@ -139,9 +142,14 @@ class TestSignalConfirmationGate:
         assert rules["SYSTEM_ALERT"] == 0
         assert rules["S6_CORRELATION_SHIFT"] == 0
 
-        # Verify all SignalType members are represented
-        for st in SignalType:
-            assert st.value in rules
+        # Every returned rule key is a valid SignalType value.
+        valid_values = {st.value for st in SignalType}
+        for key in rules:
+            assert key in valid_values
+
+        # Every SignalType except S10_BLACK_SWAN has an explicit rule.
+        expected_keys = valid_values - {SignalType.S10_BLACK_SWAN.value}
+        assert set(rules) == expected_keys
 
     def test_override_rule(self):
         """Override S1_TREND to require 3 sources, verify enforcement."""
