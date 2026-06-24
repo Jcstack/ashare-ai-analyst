@@ -283,8 +283,11 @@ class TestQuickInsightV7Upgrade:
         call_args = mock_router.complete.call_args
         messages = call_args.kwargs.get("messages", [])
         system_prompt = str(messages[0].content) if messages else ""
-        # Should contain role definition text
-        assert "即时决策" in system_prompt or "A股" in system_prompt
+        # Should contain the quick_insight role definition text. Prompt templates
+        # were rewritten in English; the role still defines an A-share
+        # instant-decision support system focused on rapid signal extraction.
+        assert "instant decision support system" in system_prompt
+        assert "A-share" in system_prompt
 
 
 class TestGetMarketOverview:

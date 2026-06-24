@@ -5,6 +5,7 @@ fallback when a provider fails. Uses config/llm.yaml for provider
 configuration and scoring.
 """
 
+import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -75,6 +76,8 @@ class LLMRouter:
         self._usage_tracker = UsageTracker()
         self._providers: dict[ProviderName, BaseLLMProvider] = {}
         self._rate_limiters: dict[ProviderName, RateLimiter] = {}
+        # Providers disabled at runtime (e.g. quota exhausted)
+        self._disabled_providers: set[ProviderName] = set()
         self._init_providers()
         self._init_rate_limiters()
 
@@ -106,8 +109,13 @@ class LLMRouter:
 
             default_model = cfg.get("default_model", "")
             fallback_model = cfg.get("fallback_model")
+            fallback_models = cfg.get("fallback_models")
             provider = _create_provider(
-                provider_name, api_key, default_model, fallback_model=fallback_model
+                provider_name,
+                api_key,
+                default_model,
+                fallback_model=fallback_model,
+                fallback_models=fallback_models,
             )
             if provider:
                 self._providers[provider_name] = provider
@@ -155,6 +163,29 @@ class LLMRouter:
         """
         return self._providers.get(name)
 
+    def _maybe_disable_provider(
+        self, provider_name: ProviderName, exc: Exception
+    ) -> None:
+        """Disable a provider for the session if it has a permanent error.
+
+        Detects quota exhaustion (insufficient_quota) and auth errors,
+        which won't resolve by retrying. Skipping the provider on
+        subsequent calls avoids wasting ~15s per call on retries.
+        """
+        msg = str(exc).lower()
+        if "insufficient_quota" in msg or "billing" in msg:
+            self._disabled_providers.add(provider_name)
+            logger.warning(
+                "Provider %s disabled for session — quota exhausted",
+                provider_name.value,
+            )
+        elif "invalid_api_key" in msg or "authentication" in msg:
+            self._disabled_providers.add(provider_name)
+            logger.warning(
+                "Provider %s disabled for session — auth error",
+                provider_name.value,
+            )
+
     def complete(
         self,
         messages: list[LLMMessage],
@@ -172,7 +203,7 @@ class LLMRouter:
         """Route a completion request to the best available provider.
 
         Args:
-            messages: Provider-neutral messages.
+            messages: Provider-neutral messages (LLMMessage or raw dicts).
             caller: Attribution string (used by LLMGateway; ignored here).
             strategy: Routing strategy override.
             preferred_provider: Force a specific provider.
@@ -218,9 +249,27 @@ class LLMRouter:
                 logger.debug("Dedup cache hit for key %s", cache_key[:8])
                 return cached
 
+        # Normalize messages: accept both LLMMessage and raw dicts
+        normalized: list[LLMMessage] = []
+        for msg in messages:
+            if isinstance(msg, LLMMessage):
+                normalized.append(msg)
+            elif isinstance(msg, dict):
+                normalized.append(
+                    LLMMessage(
+                        role=msg.get("role", "user"), content=msg.get("content", "")
+                    )
+                )
+            else:
+                normalized.append(msg)
+        messages = normalized
+
         # Try providers in order with fallback
         last_error: Exception | None = None
         for provider_name in ordered:
+            if provider_name in self._disabled_providers:
+                continue
+
             provider = self._providers.get(provider_name)
             if not provider:
                 continue
@@ -234,10 +283,15 @@ class LLMRouter:
                 )
                 continue
 
+            # Only pass model name to the preferred provider.
+            # Fallback providers use their own default model to avoid
+            # cross-provider model name mismatches (e.g. "gpt-5.4-mini" → Google 404).
+            use_model = model if provider_name == preferred_provider else None
+
             try:
                 response = provider.complete(
                     messages=messages,
-                    model=model,
+                    model=use_model,
                     max_tokens=max_tokens,
                     temperature=temperature,
                     **kwargs,
@@ -252,6 +306,7 @@ class LLMRouter:
                     limiter.set_cached(cache_key, response)
                 return response
             except LLMProviderError as exc:
+                self._maybe_disable_provider(provider_name, exc)
                 logger.warning(
                     "Provider %s failed: %s. Trying next.",
                     provider_name.value,
@@ -318,6 +373,9 @@ class LLMRouter:
 
         last_error: Exception | None = None
         for provider_name in ordered:
+            if provider_name in self._disabled_providers:
+                continue
+
             provider = self._providers.get(provider_name)
             if not provider:
                 continue
@@ -330,11 +388,14 @@ class LLMRouter:
                 )
                 continue
 
+            # Only pass model name to the preferred provider (same as complete())
+            use_model = model if provider_name == preferred_provider else None
+
             try:
                 response = provider.complete_with_tools(
                     messages=messages,
                     tools=tools,
-                    model=model,
+                    model=use_model,
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
@@ -363,6 +424,7 @@ class LLMRouter:
                 )
                 continue
             except LLMProviderError as exc:
+                self._maybe_disable_provider(provider_name, exc)
                 logger.warning(
                     "Provider %s failed tool_use: %s. Trying next.",
                     provider_name.value,
@@ -491,6 +553,7 @@ def _create_provider(
     api_key: str,
     default_model: str,
     fallback_model: str | None = None,
+    fallback_models: list[str] | None = None,
 ) -> BaseLLMProvider | None:
     """Create a provider instance by name.
 
@@ -507,7 +570,7 @@ def _create_provider(
         if name == ProviderName.CLAUDE_CODE:
             from src.llm.bridge import ClaudeCodeBridgeProvider
 
-            return ClaudeCodeBridgeProvider(model=default_model or "sonnet")
+            return ClaudeCodeBridgeProvider(model=default_model or "opus")
         if name == ProviderName.ANTHROPIC:
             from src.llm.anthropic import AnthropicProvider
 
@@ -516,6 +579,10 @@ def _create_provider(
             from src.llm.openai import OpenAIProvider
 
             return OpenAIProvider(api_key=api_key, default_model=default_model)
+        if name == ProviderName.DEEPSEEK:
+            from src.llm.deepseek import DeepSeekProvider
+
+            return DeepSeekProvider(api_key=api_key, default_model=default_model)
         if name == ProviderName.GOOGLE:
             from src.llm.google import GoogleProvider
 
@@ -523,6 +590,29 @@ def _create_provider(
                 api_key=api_key,
                 default_model=default_model,
                 fallback_model=fallback_model,
+                fallback_models=fallback_models,
+            )
+        if name == ProviderName.GEMINI_WEB:
+            cfg = load_config("llm").get("providers", {}).get("gemini_web", {})
+            from src.llm.gemini_web import GeminiWebProvider
+
+            in_docker = os.path.exists("/.dockerenv")
+            if in_docker:
+                debug_url = cfg.get(
+                    "chrome_debug_url", "http://host.docker.internal:9223"
+                )
+            else:
+                debug_url = cfg.get("chrome_debug_url_host", "http://127.0.0.1:9222")
+            return GeminiWebProvider(
+                chrome_debug_url=debug_url,
+                gemini_url=cfg.get("gemini_url", "https://gemini.google.com/app"),
+                default_model=cfg.get("default_model", "gemini-3.0-thinking"),
+                timeout=float(cfg.get("timeout_per_request", 300)),
+                page_load_timeout=float(cfg.get("page_load_timeout", 15)),
+                max_retries=int(cfg.get("max_retries", 2)),
+                retry_delay=float(cfg.get("retry_delay", 3.0)),
+                use_temporary_chat=cfg.get("use_temporary_chat", True),
+                use_thinking_mode=cfg.get("use_thinking_mode", True),
             )
     except ImportError as exc:
         logger.warning("Cannot create %s provider: %s", name.value, exc)

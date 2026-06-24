@@ -152,8 +152,8 @@ class TestFrameworkConstants:
     def test_seven_dimension_framework_exists(self):
         from src.prediction.analysis_frameworks import SEVEN_DIMENSION_FRAMEWORK
 
-        assert "D1 基本面" in SEVEN_DIMENSION_FRAMEWORK
-        assert "D7 置信度评估" in SEVEN_DIMENSION_FRAMEWORK
+        assert "D1 Fundamentals" in SEVEN_DIMENSION_FRAMEWORK
+        assert "D7 Confidence Assessment" in SEVEN_DIMENSION_FRAMEWORK
 
     def test_role_definitions_keys(self):
         from src.prediction.analysis_frameworks import ROLE_DEFINITIONS

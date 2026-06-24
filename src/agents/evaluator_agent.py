@@ -308,14 +308,16 @@ class EvaluatorAgent(BaseAgent):
             LLMMessage(
                 role="system",
                 content=(
-                    "你是独立的分析质量审计员。审查以下AI分析结果，"
-                    "识别逻辑漏洞、数据支撑不足的结论、遗漏的风险因素。"
-                    "输出简洁的2-3句审查意见。"
+                    "You are an independent analysis quality auditor. Review the following "
+                    "AI analysis output — identify logical gaps, conclusions lacking data "
+                    "support, and overlooked risk factors. "
+                    "Output a concise 2-3 sentence review. "
+                    "Write all output text in Chinese."
                 ),
             ),
             LLMMessage(
                 role="user",
-                content=f"## 分析结果\n{analysis_summary}",
+                content=f"## Analysis Result\n{analysis_summary}",
             ),
         ]
 

@@ -125,17 +125,18 @@ class PromptTester:
             return {"status": "error", "message": f"Prompt '{prompt_id}' not found"}
 
         meta_prompt = (
-            "你是一名 Prompt Engineering 专家。分析以下 prompt 模板并提出优化建议。\n\n"
-            f"## Prompt 名称\n{prompt.get('name', '')}\n\n"
+            "You are a Prompt Engineering expert. Analyze the following prompt template and provide optimization suggestions.\n\n"
+            f"## Prompt Name\n{prompt.get('name', '')}\n\n"
             f"## System Template\n```\n{prompt.get('system_template', '')}\n```\n\n"
             f"## User Template\n```\n{prompt.get('user_template', '')}\n```\n\n"
         )
 
         if test_output:
-            meta_prompt += f"## 最近一次测试输出\n```\n{test_output[:2000]}\n```\n\n"
+            meta_prompt += f"## Latest Test Output\n```\n{test_output[:2000]}\n```\n\n"
 
         meta_prompt += (
-            "请从以下维度给出优化建议，严格按照JSON格式输出：\n"
+            "Provide optimization suggestions across the following dimensions. Output strictly in JSON format. "
+            "Write all output text values in Chinese.\n"
             "```json\n"
             "{\n"
             '  "overall_score": 0~100,\n'
@@ -151,7 +152,10 @@ class PromptTester:
         messages = [
             LLMMessage(
                 role="system",
-                content="你是Prompt Engineering专家，帮助优化A股分析prompt模板。",
+                content=(
+                    "You are a Prompt Engineering expert. Help optimize A-share analysis prompt templates. "
+                    "Write all output text in Chinese."
+                ),
             ),
             LLMMessage(role="user", content=meta_prompt),
         ]

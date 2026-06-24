@@ -353,8 +353,15 @@ class InfoStore:
             params.append(int(bookmarked))
 
         if symbol is not None:
-            where_clauses.append("related_symbols LIKE ?")
-            params.append(f'%"{symbol}"%')
+            # Support comma-separated multi-symbol filter (I-093 "与我相关")
+            symbols = [s.strip() for s in symbol.split(",") if s.strip()]
+            if len(symbols) == 1:
+                where_clauses.append("related_symbols LIKE ?")
+                params.append(f'%"{symbols[0]}"%')
+            elif symbols:
+                sym_clauses = ["related_symbols LIKE ?" for _ in symbols]
+                where_clauses.append(f"({' OR '.join(sym_clauses)})")
+                params.extend(f'%"{s}"%' for s in symbols)
 
         where = " AND ".join(where_clauses)
         params.extend([limit, offset])

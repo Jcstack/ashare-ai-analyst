@@ -3,7 +3,10 @@
 Entry point: ``python -m src.web.app``
 """
 
+import base64
+import os
 import re
+import secrets
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -27,8 +30,9 @@ _STATIC_DIR = _PROJECT_ROOT / "static"
 
 _SLOW_REQUEST_THRESHOLD = 2.0  # seconds
 
-# Valid A-share symbol: 6 digits, optionally prefixed by 1-2 uppercase letters
-_SYMBOL_RE = re.compile(r"^[A-Za-z]{0,2}\d{6}$")
+# Valid A-share symbol: 6 digits, optionally prefixed by exchange letters
+# or suffixed by .SZ/.SH/.BJ (e.g. 000983, sz000983, 000983.SZ)
+_SYMBOL_RE = re.compile(r"^[A-Za-z]{0,2}\d{6}(?:\.[A-Za-z]{2,3})?$")
 
 # URL path segments where the next segment is a stock symbol
 _SYMBOL_ROUTES = re.compile(r"/api/v1/(?:stock|predict|advisor/stock)/([^/]+)")
@@ -128,6 +132,36 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # HTTP Basic Auth — gate the dashboard/API when WEB_USERNAME/WEB_PASSWORD are set.
+    # Leave both empty for open access (default); /health stays public for probes.
+    _web_user = os.environ.get("WEB_USERNAME", "").strip()
+    _web_pass = os.environ.get("WEB_PASSWORD", "").strip()
+    _auth_enabled = bool(_web_user and _web_pass)
+
+    @app.middleware("http")
+    async def basic_auth_middleware(request: Request, call_next) -> JSONResponse:
+        if not _auth_enabled or request.url.path == "/health":
+            return await call_next(request)
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(auth_header[6:]).decode(
+                    "utf-8", errors="replace"
+                )
+                username, _, password = decoded.partition(":")
+                user_ok = secrets.compare_digest(username, _web_user)
+                pass_ok = secrets.compare_digest(password, _web_pass)
+                if user_ok and pass_ok:
+                    return await call_next(request)
+            except (ValueError, UnicodeDecodeError):
+                logger.debug("Basic Auth decode error", exc_info=True)
+        return JSONResponse(
+            status_code=401,
+            # realm must be latin-1 encodable (HTTP header) — keep it ASCII
+            headers={"WWW-Authenticate": 'Basic realm="A-Share Analysis System"'},
+            content={"detail": "Unauthorized"},
+        )
+
     # Symbol validation middleware — reject injection payloads early
     @app.middleware("http")
     async def symbol_validation_middleware(request: Request, call_next):
@@ -165,6 +199,54 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health_check():
         return {"status": "ok"}
+
+    @app.get("/health/deep")
+    async def health_deep():
+        """Deep health check — verifies all critical dependencies."""
+        checks: dict[str, str] = {}
+
+        # Redis (Celery broker)
+        try:
+            from src.web.dependencies import get_redis
+
+            r = get_redis()
+            if r:
+                r.ping()
+                checks["redis"] = "ok"
+            else:
+                checks["redis"] = "unavailable"
+        except Exception as exc:
+            checks["redis"] = f"error: {exc}"
+
+        # EventBus (Redis Streams)
+        try:
+            from src.event_bus.bus import EventBus
+
+            EventBus()
+            # EventBus lazily connects; just verify config resolves
+            checks["eventbus"] = "ok"
+        except Exception as exc:
+            checks["eventbus"] = f"error: {exc}"
+
+        # LLM Router
+        try:
+            from src.web.dependencies import get_llm_router
+
+            router = get_llm_router()
+            providers = [p.value for p in router._providers.keys()]
+            checks["llm"] = f"ok ({', '.join(providers)})"
+        except Exception as exc:
+            checks["llm"] = f"error: {exc}"
+
+        all_ok = all(v.startswith("ok") for v in checks.values())
+        status_code = 200 if all_ok else 503
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "status": "ok" if all_ok else "degraded",
+                "checks": checks,
+            },
+        )
 
     # JSON REST API v1 for React SPA
     app.include_router(api_v1.router)

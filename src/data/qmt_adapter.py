@@ -288,6 +288,205 @@ class QmtDataAdapter:
             return None
 
     # ------------------------------------------------------------------
+    # Level-2 order book
+    # ------------------------------------------------------------------
+
+    def get_order_book(self, symbol: str) -> dict[str, Any] | None:
+        """Get current Level-2 order book snapshot.
+
+        Uses ``xtdata.get_full_tick()`` to extract multi-level bid/ask depth.
+
+        Args:
+            symbol: 6-digit stock code.
+
+        Returns:
+            Dict with bid/ask price/volume arrays and derived fields,
+            or None if unavailable.
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            xt_code = self.to_xt_code(symbol)
+            ticks = xtdata.get_full_tick([xt_code])
+            if not ticks or xt_code not in ticks:
+                return None
+
+            tick = ticks[xt_code]
+            return self._parse_order_book(symbol, tick)
+        except Exception as exc:
+            logger.warning("QMT get_order_book failed for %s: %s", symbol, exc)
+            self._connected = False
+            return None
+
+    def get_order_book_batch(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        """Batch get order book snapshots for multiple symbols.
+
+        Args:
+            symbols: List of 6-digit stock codes.
+
+        Returns:
+            Mapping of symbol → order book dict. Missing symbols are omitted.
+        """
+        if not self.is_available():
+            return {}
+
+        try:
+            xt_codes = [self.to_xt_code(s) for s in symbols]
+            ticks = xtdata.get_full_tick(xt_codes)
+            if not ticks:
+                return {}
+
+            results: dict[str, dict[str, Any]] = {}
+            for xt_code, tick in ticks.items():
+                sym = self.from_xt_code(xt_code)
+                parsed = self._parse_order_book(sym, tick)
+                if parsed is not None:
+                    results[sym] = parsed
+            return results
+        except Exception as exc:
+            logger.warning("QMT get_order_book_batch failed: %s", exc)
+            self._connected = False
+            return {}
+
+    @staticmethod
+    def _parse_order_book(symbol: str, tick: dict[str, Any]) -> dict[str, Any] | None:
+        """Parse a single XtQuant full-tick dict into an order book dict.
+
+        Args:
+            symbol: 6-digit stock code.
+            tick: Raw dict from ``xtdata.get_full_tick()``.
+
+        Returns:
+            Parsed order book dict, or None if data is empty/invalid.
+        """
+        ask_prices_raw: list[float] = tick.get("askPrice", [])
+        bid_prices_raw: list[float] = tick.get("bidPrice", [])
+        ask_vols_raw: list[int] = tick.get("askVol", [])
+        bid_vols_raw: list[int] = tick.get("bidVol", [])
+        last_price: float = tick.get("lastPrice", 0)
+
+        if not last_price:
+            return None
+
+        # Filter out zero-padded levels
+        bid_prices = [p for p in bid_prices_raw if p > 0]
+        ask_prices = [p for p in ask_prices_raw if p > 0]
+        bid_volumes = [int(v) for p, v in zip(bid_prices_raw, bid_vols_raw) if p > 0]
+        ask_volumes = [int(v) for p, v in zip(ask_prices_raw, ask_vols_raw) if p > 0]
+
+        total_bid = sum(bid_volumes)
+        total_ask = sum(ask_volumes)
+
+        best_bid = bid_prices[0] if bid_prices else 0.0
+        best_ask = ask_prices[0] if ask_prices else 0.0
+        spread = round(best_ask - best_bid, 4) if best_ask and best_bid else 0.0
+        mid_price = (
+            round((best_ask + best_bid) / 2, 4) if best_ask and best_bid else last_price
+        )
+
+        return {
+            "symbol": symbol,
+            "timestamp": tick.get("time", 0) / 1000.0 if tick.get("time") else 0.0,
+            "last_price": last_price,
+            "bid_prices": bid_prices,
+            "bid_volumes": bid_volumes,
+            "ask_prices": ask_prices,
+            "ask_volumes": ask_volumes,
+            "total_bid_volume": total_bid,
+            "total_ask_volume": total_ask,
+            "spread": spread,
+            "mid_price": mid_price,
+            "last_volume": int(tick.get("lastVolume", 0)),
+            "total_volume": int(tick.get("volume", 0)),
+            "total_amount": float(tick.get("amount", 0)),
+        }
+
+    # ------------------------------------------------------------------
+    # Tick stream
+    # ------------------------------------------------------------------
+
+    def get_tick_stream(self, symbol: str, count: int = 100) -> list[dict[str, Any]]:
+        """Get recent tick-by-tick trade records.
+
+        Returns a list of individual trade dicts with Lee-Ready direction
+        classification (compare trade price to prevailing mid-price).
+
+        Args:
+            symbol: 6-digit stock code.
+            count: Maximum number of recent ticks to return.
+
+        Returns:
+            List of trade dicts sorted by time ascending. Empty if
+            unavailable.
+        """
+        if not self.is_available():
+            return []
+
+        try:
+            xt_code = self.to_xt_code(symbol)
+            # get_market_data_ex with period="tick" returns historical ticks
+            data = xtdata.get_market_data_ex(
+                field_list=[],
+                stock_list=[xt_code],
+                period="tick",
+                count=count,
+            )
+            if not data or xt_code not in data:
+                return []
+
+            df = data[xt_code]
+            if df is None or df.empty:
+                return []
+
+            records: list[dict[str, Any]] = []
+            for _, row in df.iterrows():
+                price = float(row.get("lastPrice", 0))
+                volume = int(row.get("volume", 0))
+                amount = float(row.get("amount", 0))
+                ts = float(row.get("time", 0)) / 1000.0
+
+                # Lee-Ready classification: compare price to mid
+                ask = (
+                    float(row.get("askPrice", [0])[0])
+                    if isinstance(row.get("askPrice"), (list, tuple))
+                    else 0
+                )
+                bid = (
+                    float(row.get("bidPrice", [0])[0])
+                    if isinstance(row.get("bidPrice"), (list, tuple))
+                    else 0
+                )
+
+                if ask > 0 and bid > 0:
+                    mid = (ask + bid) / 2
+                    if price > mid:
+                        direction = "buy"
+                    elif price < mid:
+                        direction = "sell"
+                    else:
+                        direction = "neutral"
+                else:
+                    direction = "neutral"
+
+                records.append(
+                    {
+                        "timestamp": ts,
+                        "price": price,
+                        "volume": volume,
+                        "amount": amount or price * volume,
+                        "direction": direction,
+                        "is_large": amount >= 500_000,  # ≥50万
+                    }
+                )
+
+            return records[-count:]
+        except Exception as exc:
+            logger.warning("QMT get_tick_stream failed for %s: %s", symbol, exc)
+            self._connected = False
+            return []
+
+    # ------------------------------------------------------------------
     # Daily OHLCV
     # ------------------------------------------------------------------
 

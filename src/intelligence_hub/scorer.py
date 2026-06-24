@@ -24,6 +24,176 @@ from src.intelligence_hub.source_registry import SourceRegistry
 
 logger = logging.getLogger(__name__)
 
+# -- Weighted sentiment classification --
+# Each keyword has a weight reflecting signal strength:
+#   3 = very strong signal, 2 = strong, 1 = moderate
+_BULLISH_WEIGHTED: list[tuple[str, int]] = [
+    # Very strong (3)
+    ("一字板涨停", 3),
+    ("业绩超预期", 3),
+    ("大幅增持", 3),
+    ("连续涨停", 3),
+    ("重大利好", 3),
+    ("surge", 3),
+    ("soars", 3),
+    # Strong (2)
+    ("涨停", 2),
+    ("大涨", 2),
+    ("飙升", 2),
+    ("新高", 2),
+    ("突破", 2),
+    ("利好", 2),
+    ("增持", 2),
+    ("回购", 2),
+    ("净利润增长", 2),
+    ("营收增长", 2),
+    ("中标", 2),
+    ("获批", 2),
+    ("机构买入", 2),
+    ("北向资金", 2),
+    ("rally", 2),
+    ("breakout", 2),
+    ("upgrade", 2),
+    ("beat", 2),
+    # Moderate (1)
+    ("订单", 1),
+    ("回暖", 1),
+    ("企稳", 1),
+    ("放量", 1),
+    ("反弹", 1),
+    ("看好", 1),
+    ("bullish", 1),
+    ("jumps", 1),
+    ("gains", 1),
+    ("positive", 1),
+]
+
+_BEARISH_WEIGHTED: list[tuple[str, int]] = [
+    # Very strong (3)
+    ("一字板跌停", 3),
+    ("财务造假", 3),
+    ("退市", 3),
+    ("业绩暴雷", 3),
+    ("重大利空", 3),
+    ("crash", 3),
+    ("plunge", 3),
+    # Strong (2)
+    ("跌停", 2),
+    ("大跌", 2),
+    ("暴跌", 2),
+    ("新低", 2),
+    ("破位", 2),
+    ("利空", 2),
+    ("减持", 2),
+    ("质押", 2),
+    ("业绩不及预期", 2),
+    ("亏损", 2),
+    ("违规", 2),
+    ("处罚", 2),
+    ("机构卖出", 2),
+    ("downgrade", 2),
+    ("miss", 2),
+    # Moderate (1)
+    ("下滑", 1),
+    ("缩量", 1),
+    ("走弱", 1),
+    ("承压", 1),
+    ("警惕", 1),
+    ("bearish", 1),
+    ("falls", 1),
+    ("drops", 1),
+    ("loses", 1),
+    ("negative", 1),
+    ("warning", 1),
+]
+
+# Negation prefixes — flip sentiment when preceding a keyword
+_NEGATION_PREFIXES = ["不", "未", "没有", "非", "否认", "难以", "not ", "no "]
+
+
+def classify_sentiment(title: str, summary: str = "") -> str:
+    """Classify news sentiment as 'bullish', 'bearish', or 'neutral'.
+
+    Uses weighted keyword matching with negation handling.
+    Longer phrases are matched first to avoid partial hits.
+    """
+    text = (title + " " + summary).lower()
+
+    bull_score = 0.0
+    bear_score = 0.0
+
+    for kw, weight in _BULLISH_WEIGHTED:
+        pos = text.find(kw)
+        if pos >= 0:
+            # Check for negation prefix (flips sentiment)
+            if _has_negation(text, pos):
+                bear_score += weight
+            else:
+                bull_score += weight
+
+    for kw, weight in _BEARISH_WEIGHTED:
+        pos = text.find(kw)
+        if pos >= 0:
+            if _has_negation(text, pos):
+                bull_score += weight
+            else:
+                bear_score += weight
+
+    if bull_score > bear_score:
+        return "bullish"
+    elif bear_score > bull_score:
+        return "bearish"
+    return "neutral"
+
+
+def classify_sentiment_score(title: str, summary: str = "") -> tuple[str, float]:
+    """Enhanced sentiment classification returning direction and intensity.
+
+    Returns:
+        (direction, intensity) where direction is 'bullish'/'bearish'/'neutral'
+        and intensity is 0.0-1.0 (0=neutral, 1=extreme sentiment).
+    """
+    text = (title + " " + summary).lower()
+
+    bull_score = 0.0
+    bear_score = 0.0
+
+    for kw, weight in _BULLISH_WEIGHTED:
+        pos = text.find(kw)
+        if pos >= 0:
+            if _has_negation(text, pos):
+                bear_score += weight
+            else:
+                bull_score += weight
+
+    for kw, weight in _BEARISH_WEIGHTED:
+        pos = text.find(kw)
+        if pos >= 0:
+            if _has_negation(text, pos):
+                bull_score += weight
+            else:
+                bear_score += weight
+
+    total = bull_score + bear_score
+    if total == 0:
+        return "neutral", 0.0
+
+    if bull_score > bear_score:
+        intensity = min(1.0, (bull_score - bear_score) / max(total, 1.0))
+        return "bullish", round(intensity, 3)
+    elif bear_score > bull_score:
+        intensity = min(1.0, (bear_score - bull_score) / max(total, 1.0))
+        return "bearish", round(intensity, 3)
+    return "neutral", 0.0
+
+
+def _has_negation(text: str, keyword_pos: int) -> bool:
+    """Check if a negation prefix appears within 4 chars before keyword_pos."""
+    window_start = max(0, keyword_pos - 4)
+    prefix = text[window_start:keyword_pos]
+    return any(neg in prefix for neg in _NEGATION_PREFIXES)
+
+
 # Default timeliness buckets (hours, factor)
 _DEFAULT_TIMELINESS = [
     (1, 1.0),
@@ -146,8 +316,22 @@ class ContentScorer:
             "points": round(noise_pts, 2),
         }
 
+        # 7. Sentiment intensity bonus (rewards high-conviction signals)
+        sentiment_factor = self._sentiment_bonus(item)
+        sentiment_pts = sentiment_factor * 5  # up to 1.5 bonus points
+        explain["sentiment_bonus"] = {
+            "factor": round(sentiment_factor, 2),
+            "points": round(sentiment_pts, 2),
+        }
+
         raw = (
-            source_pts + timeliness_pts + cv_pts + domain_pts + quality_pts - noise_pts
+            source_pts
+            + timeliness_pts
+            + cv_pts
+            + domain_pts
+            + quality_pts
+            + sentiment_pts
+            - noise_pts
         )
         final = max(0.0, min(100.0, raw))
 
@@ -216,4 +400,30 @@ class ContentScorer:
         if "score" in extra and isinstance(extra["score"], (int, float)):
             if extra["score"] < self._social_min_score:
                 penalties += 0.3
+        # L4/L5 items without stock association are likely generic noise (I-093)
+        if not item.related_symbols:
+            meta = self._registry.get(item.source_id)
+            if meta and meta.layer in ("L4", "L5"):
+                penalties += 0.4
+        # Duplicate-heavy clusters: items whose title is very similar to
+        # many others in the same batch suggest regurgitated content
+        if extra.get("cluster_size", 0) > 5:
+            penalties += 0.2  # crowded cluster → diminishing value
         return min(1.0, penalties)
+
+    def _sentiment_bonus(self, item: InfoItem) -> float:
+        """Bonus for high-intensity sentiment signals.
+
+        Strong sentiment (bullish or bearish) makes news more actionable
+        for trading decisions. Returns 0.0-0.3 bonus factor.
+        """
+        extra = item.extra or {}
+        intensity = extra.get("sentiment_intensity", 0.0)
+        if not isinstance(intensity, (int, float)):
+            return 0.0
+        # Only reward strong sentiment (> 0.5 intensity)
+        if intensity > 0.7:
+            return 0.3
+        elif intensity > 0.5:
+            return 0.15
+        return 0.0

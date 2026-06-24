@@ -278,27 +278,38 @@ class VaRCalculator:
 
     def calculate_all(
         self,
-        returns: np.ndarray,
+        returns: np.ndarray | list,
         portfolio_value: float,
         confidence_level: float = 0.95,
         holding_period: int = 1,
     ) -> list[VaRResult]:
         """Run all three VaR methods and return results."""
-        results = []
+        arr = np.asarray(returns, dtype=float)
+        arr = arr[np.isfinite(arr)]
 
-        results.append(
-            self.historical_var(
-                returns, portfolio_value, confidence_level, holding_period
+        if len(arr) == 0:
+            empty = VaRResult(
+                method="insufficient_data",
+                confidence_level=confidence_level,
+                holding_period=holding_period,
+                var_pct=0.0,
+                var_amount=0.0,
+                portfolio_value=portfolio_value,
+                sample_size=0,
+                warnings=["收益率数据为空，无法计算 VaR"],
             )
+            return [empty]
+
+        results = []
+        results.append(
+            self.historical_var(arr, portfolio_value, confidence_level, holding_period)
         )
         results.append(
-            self.parametric_var(
-                returns, portfolio_value, confidence_level, holding_period
-            )
+            self.parametric_var(arr, portfolio_value, confidence_level, holding_period)
         )
         results.append(
             self.monte_carlo_cvar(
-                returns, portfolio_value, confidence_level, holding_period
+                arr, portfolio_value, confidence_level, holding_period
             )
         )
 

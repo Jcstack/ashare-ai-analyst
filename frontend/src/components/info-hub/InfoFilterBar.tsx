@@ -1,7 +1,7 @@
 /** Search + priority filter bar for the info feed. */
 
 import { useState } from "react"
-import { Search, RefreshCw } from "lucide-react"
+import { Search, RefreshCw, Target } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,7 @@ import { useInfoHubStore } from "@/stores/infoHubStore"
 import { useRefreshFeed } from "@/hooks/useInfoHub"
 
 export function InfoFilterBar() {
-  const { searchQuery, priorityFilter, sortBy, setSearchQuery, setPriorityFilter, setSortBy } = useInfoHubStore()
+  const { searchQuery, priorityFilter, sortBy, relevanceOnly, setSearchQuery, setPriorityFilter, setSortBy, setRelevanceOnly } = useInfoHubStore()
   const refreshMutation = useRefreshFeed()
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null)
 
@@ -59,6 +59,17 @@ export function InfoFilterBar() {
           <SelectItem value="normal">一般</SelectItem>
         </SelectContent>
       </Select>
+
+      <Button
+        variant={relevanceOnly ? "default" : "outline"}
+        size="sm"
+        className="h-8 gap-1.5"
+        onClick={() => setRelevanceOnly(!relevanceOnly)}
+        title="只显示与持仓/自选股相关的情报"
+      >
+        <Target className="h-3.5 w-3.5" />
+        与我相关
+      </Button>
 
       <Select
         value={sortBy}

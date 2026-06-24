@@ -102,6 +102,7 @@ async def _gather_analysis_data(
         _throttled_thread(svc.get_support_resistance, symbol),
         _throttled_thread(svc.fetcher.fetch_dragon_tiger_stock_stats, symbol),
         _throttled_thread(svc.fetcher.fetch_fund_flow_detail, symbol),
+        _throttled_thread(svc.fetcher.fetch_intraday_fund_flow_series, symbol),
         _throttled_thread(policy_fetcher.format_for_prompt, None, 8),
         _throttled_thread(svc.fetcher.fetch_valuation_indicator, symbol),
         return_exceptions=True,
@@ -125,8 +126,9 @@ async def _gather_analysis_data(
     fund_flow_detail_raw = (
         results[13] if not isinstance(results[13], Exception) else None
     )
-    policy_context = results[14] if not isinstance(results[14], Exception) else ""
-    valuation_raw = results[15] if not isinstance(results[15], Exception) else {}
+    fund_flow_timeline = results[14] if not isinstance(results[14], Exception) else []
+    policy_context = results[15] if not isinstance(results[15], Exception) else ""
+    valuation_raw = results[16] if not isinstance(results[16], Exception) else {}
 
     return validator.validate_and_enrich(
         symbol=symbol,
@@ -145,6 +147,9 @@ async def _gather_analysis_data(
         support_resistance=support_resistance,
         dragon_tiger=dragon_tiger_raw,
         fund_flow_detail=fund_flow_detail_raw,
+        fund_flow_timeline=fund_flow_timeline
+        if isinstance(fund_flow_timeline, list)
+        else [],
         policy_context=policy_context if isinstance(policy_context, str) else "",
         valuation=valuation_raw if isinstance(valuation_raw, dict) else {},
     )

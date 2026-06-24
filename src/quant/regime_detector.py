@@ -1,14 +1,17 @@
-"""Market regime detection using volatility-based Hidden Markov Model.
+"""Market regime detection using Hidden Markov Model with volatility fallback.
 
-Identifies market states (low/medium/high volatility) from rolling
-volatility series. Uses a simplified HMM approach that doesn't require
-scipy — fits regimes via rolling percentile thresholds.
+Primary: 3-state Gaussian HMM learns hidden states (bull/bear/consolidation)
+from daily returns + rolling volatility features via hmmlearn.
 
-Part of v15.0 Quant Core layer.
+Fallback: Volatility percentile thresholds when hmmlearn is not installed
+or data is insufficient.
+
+Part of v15.0 Quant Core layer, enhanced in v50.0 (PRD SS5.6).
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -21,6 +24,13 @@ logger = get_logger("quant.regime_detector")
 
 TRADING_DAYS_PER_YEAR = 252
 
+# HMM state labels ordered by mean-return ranking
+_HMM_LABELS: dict[str, str] = {
+    "bull": "bull",
+    "bear": "bear",
+    "consolidation": "consolidation",
+}
+
 
 @dataclass
 class RegimeState:
@@ -32,6 +42,9 @@ class RegimeState:
         regime_label: Human-readable label from config.
         volatility: Annualized rolling volatility at this point.
         percentile: Percentile rank of current volatility vs lookback.
+        hmm_state: HMM-derived label (bull/bear/consolidation).
+        hmm_probability: Probability of the current HMM state.
+        switch_probability: 1 - P(stay in current state).
     """
 
     date: str = ""
@@ -39,6 +52,9 @@ class RegimeState:
     regime_label: str = ""
     volatility: float = 0.0
     percentile: float = 0.0
+    hmm_state: str = ""
+    hmm_probability: float = 0.0
+    switch_probability: float = 0.0
 
 
 @dataclass
@@ -65,6 +81,7 @@ class RegimeReport:
         regime_distribution: Fraction of time spent in each regime.
         avg_duration: Average consecutive days in each regime.
         summary: Human-readable summary.
+        method: Detection method used ("hmm" or "volatility_percentile").
     """
 
     current_regime: RegimeState = field(default_factory=RegimeState)
@@ -73,19 +90,21 @@ class RegimeReport:
     regime_distribution: dict[str, float] = field(default_factory=dict)
     avg_duration: dict[str, float] = field(default_factory=dict)
     summary: str = ""
+    method: str = ""
 
 
 class RegimeDetector:
-    """Volatility-based market regime detection.
+    """Market regime detection with HMM primary and volatility fallback.
 
-    Uses rolling volatility percentiles to classify market into
-    3 regimes: low, medium, and high volatility.
+    Uses a 3-state Gaussian HMM (from hmmlearn) trained on [daily_return,
+    rolling_volatility] features. Falls back to volatility percentile
+    thresholds when hmmlearn is unavailable or fitting fails.
 
     Usage::
 
         detector = RegimeDetector()
         report = detector.detect(daily_returns=returns_series, dates=date_list)
-        print(report.current_regime.regime_label)
+        print(report.current_regime.hmm_state)
     """
 
     def __init__(self) -> None:
@@ -94,6 +113,7 @@ class RegimeDetector:
         self.vol_window = cfg.get("volatility_window_days", 20)
         self.lookback = cfg.get("lookback_days", 252)
         self.min_obs = cfg.get("min_observations", 60)
+        self._hmm_n_iter = cfg.get("hmm_n_iter", 100)
         self.regime_labels: dict[int, str] = {
             int(k): v
             for k, v in cfg.get(
@@ -102,12 +122,16 @@ class RegimeDetector:
             ).items()
         }
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def detect(
         self,
         daily_returns: list[float] | pd.Series,
         dates: list[str] | None = None,
     ) -> RegimeReport:
-        """Run regime detection on a return series.
+        """Run regime detection — HMM first, volatility percentile fallback.
 
         Args:
             daily_returns: Daily percentage returns (decimals).
@@ -119,7 +143,224 @@ class RegimeDetector:
         returns = (
             daily_returns
             if isinstance(daily_returns, pd.Series)
-            else pd.Series(daily_returns)
+            else pd.Series(daily_returns, dtype=float)
+        )
+        n = len(returns)
+
+        if n < self.min_obs:
+            return RegimeReport(
+                summary=f"Insufficient data: {n} days < {self.min_obs} required",
+            )
+
+        # Try HMM first when we have enough data
+        if n >= self.min_obs:
+            try:
+                return self.detect_hmm(returns, dates)
+            except Exception as exc:
+                logger.debug(
+                    "HMM detection failed, falling back to volatility: %s", exc
+                )
+
+        return self._detect_volatility(returns, dates)
+
+    # ------------------------------------------------------------------
+    # HMM-based detection (primary)
+    # ------------------------------------------------------------------
+
+    def detect_hmm(
+        self,
+        daily_returns: list[float] | pd.Series,
+        dates: list[str] | None = None,
+    ) -> RegimeReport:
+        """Run 3-state Gaussian HMM regime detection.
+
+        Fits a GaussianHMM on [daily_return, rolling_volatility] features.
+        Maps learned states to bull/bear/consolidation by mean return.
+
+        Args:
+            daily_returns: Daily percentage returns (decimals).
+            dates: ISO date strings aligned with daily_returns.
+
+        Returns:
+            RegimeReport with HMM-derived states.
+
+        Raises:
+            ImportError: If hmmlearn is not installed.
+            ValueError: If data is insufficient or HMM fitting fails.
+        """
+        try:
+            from hmmlearn.hmm import GaussianHMM
+        except ImportError:
+            raise ImportError(
+                "hmmlearn is required for HMM regime detection. "
+                "Install with: pip install hmmlearn>=0.3.0"
+            )
+
+        returns = (
+            daily_returns
+            if isinstance(daily_returns, pd.Series)
+            else pd.Series(daily_returns, dtype=float)
+        )
+        n = len(returns)
+
+        if n < self.min_obs:
+            raise ValueError(f"Insufficient data: {n} days < {self.min_obs} required")
+
+        # --- Feature preparation ---
+        rolling_vol = returns.rolling(window=self.vol_window).std() * np.sqrt(
+            TRADING_DAYS_PER_YEAR
+        )
+
+        # Align returns and volatility (drop NaN from rolling window warmup)
+        valid_mask = rolling_vol.notna()
+        aligned_returns = returns[valid_mask].values
+        aligned_vol = rolling_vol[valid_mask].values
+        valid_indices = np.where(valid_mask)[0]
+
+        if len(aligned_returns) < self.min_obs:
+            raise ValueError(
+                f"Insufficient aligned data: {len(aligned_returns)} < {self.min_obs}"
+            )
+
+        # Stack 2D observation matrix: [return, volatility]
+        observations = np.column_stack([aligned_returns, aligned_vol])
+
+        # --- Fit HMM ---
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = GaussianHMM(
+                n_components=self.n_regimes,
+                covariance_type="full",
+                n_iter=self._hmm_n_iter,
+                random_state=42,
+            )
+            model.fit(observations)
+
+        # --- State mapping: order by mean return ---
+        # model.means_ is (n_components, n_features); col 0 = return
+        mean_returns = model.means_[:, 0]
+        sorted_indices = np.argsort(mean_returns)  # ascending: bear, consol, bull
+
+        # Map: lowest mean → bear, middle → consolidation, highest → bull
+        hmm_to_label: dict[int, str] = {}
+        hmm_to_semantic_id: dict[int, int] = {}
+        for rank, hmm_idx in enumerate(sorted_indices):
+            if rank == 0:
+                hmm_to_label[hmm_idx] = "bear"
+                hmm_to_semantic_id[hmm_idx] = 0
+            elif rank == self.n_regimes - 1:
+                hmm_to_label[hmm_idx] = "bull"
+                hmm_to_semantic_id[hmm_idx] = 2
+            else:
+                hmm_to_label[hmm_idx] = "consolidation"
+                hmm_to_semantic_id[hmm_idx] = 1
+
+        # --- Predict state sequence and probabilities ---
+        hidden_states = model.predict(observations)
+        state_probs = model.predict_proba(observations)
+
+        # --- Extract HMM transition matrix ---
+        hmm_transmat = model.transmat_
+
+        # Reorder transition matrix to semantic order (bear=0, consol=1, bull=2)
+        semantic_labels = {0: "bear", 1: "consolidation", 2: "bull"}
+        reordered_transmat: list[list[float]] = []
+        for from_semantic in range(self.n_regimes):
+            row: list[float] = []
+            # Find which HMM index maps to this semantic id
+            from_hmm = _semantic_to_hmm(from_semantic, hmm_to_semantic_id)
+            for to_semantic in range(self.n_regimes):
+                to_hmm = _semantic_to_hmm(to_semantic, hmm_to_semantic_id)
+                if from_hmm is not None and to_hmm is not None:
+                    row.append(float(hmm_transmat[from_hmm, to_hmm]))
+                else:
+                    row.append(0.0)
+            reordered_transmat.append(row)
+
+        tm = TransitionMatrix(
+            matrix=reordered_transmat,
+            regime_labels=semantic_labels,
+        )
+
+        # --- Build regime history ---
+        history: list[RegimeState] = []
+        mapped_ids = np.array([hmm_to_semantic_id[s] for s in hidden_states])
+
+        for i, (hmm_state, orig_idx) in enumerate(zip(hidden_states, valid_indices)):
+            date_str = (
+                dates[orig_idx] if dates and orig_idx < len(dates) else str(orig_idx)
+            )
+            label = hmm_to_label[hmm_state]
+            semantic_id = hmm_to_semantic_id[hmm_state]
+            prob = float(state_probs[i, hmm_state])
+            vol = float(aligned_vol[i])
+
+            # Switch probability = 1 - P(stay in current state)
+            stay_prob = float(hmm_transmat[hmm_state, hmm_state])
+            switch_prob = 1.0 - stay_prob
+
+            history.append(
+                RegimeState(
+                    date=date_str,
+                    regime_id=semantic_id,
+                    regime_label=label,
+                    volatility=vol,
+                    percentile=_percentile_rank(pd.Series(aligned_vol[: i + 1]), vol),
+                    hmm_state=label,
+                    hmm_probability=prob,
+                    switch_probability=switch_prob,
+                )
+            )
+
+        # Current regime
+        current = history[-1] if history else RegimeState()
+
+        # Distribution and average duration (using semantic ids)
+        distribution = _regime_distribution(mapped_ids, self.n_regimes, semantic_labels)
+        avg_dur = _avg_regime_duration(mapped_ids, self.n_regimes, semantic_labels)
+
+        # Summary
+        summary_parts = [
+            f"Current: {current.hmm_state} (P={current.hmm_probability:.0%})",
+            f"Switch P={current.switch_probability:.0%}",
+            f"Distribution: {', '.join(f'{k}={v:.0%}' for k, v in distribution.items())}",
+        ]
+
+        return RegimeReport(
+            current_regime=current,
+            regime_history=history,
+            transition_matrix=tm,
+            regime_distribution=distribution,
+            avg_duration=avg_dur,
+            summary=" | ".join(summary_parts),
+            method="hmm",
+        )
+
+    # ------------------------------------------------------------------
+    # Volatility-percentile detection (fallback)
+    # ------------------------------------------------------------------
+
+    def _detect_volatility(
+        self,
+        daily_returns: list[float] | pd.Series,
+        dates: list[str] | None = None,
+    ) -> RegimeReport:
+        """Run regime detection using volatility percentile thresholds.
+
+        This is the original detection method, retained as fallback when
+        hmmlearn is not installed or HMM fitting fails.
+
+        Args:
+            daily_returns: Daily percentage returns (decimals).
+            dates: ISO date strings aligned with daily_returns.
+
+        Returns:
+            RegimeReport with volatility-based regimes.
+        """
+        returns = (
+            daily_returns
+            if isinstance(daily_returns, pd.Series)
+            else pd.Series(daily_returns, dtype=float)
         )
         n = len(returns)
 
@@ -190,12 +431,21 @@ class RegimeDetector:
             regime_distribution=distribution,
             avg_duration=avg_dur,
             summary=" | ".join(summary_parts),
+            method="volatility_percentile",
         )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _semantic_to_hmm(semantic_id: int, mapping: dict[int, int]) -> int | None:
+    """Find HMM index that maps to a given semantic id."""
+    for hmm_idx, sem_id in mapping.items():
+        if sem_id == semantic_id:
+            return hmm_idx
+    return None
 
 
 def _classify_regimes(vol_series: pd.Series) -> np.ndarray:

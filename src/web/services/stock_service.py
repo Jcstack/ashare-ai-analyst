@@ -141,7 +141,7 @@ class StockService:
             "low": float(last["low"]),
             "change": float(change),
             "pct_change": float(pct),
-            "volume": int(last["volume"]),
+            "volume": int(last["volume"]) if "volume" in last.index else 0,
             "date": str(last.get("date", "")),
         }
 

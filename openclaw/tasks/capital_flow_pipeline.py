@@ -205,6 +205,22 @@ def task_capital_flow_scan(self) -> dict[str, Any]:
             except Exception as exc:
                 logger.warning("Failed to push capital flow notifications: %s", exc)
 
+        # ── Step 5: Publish to standard event bus for consumers ────────
+        try:
+            from src.event_bus.producers import publish_signal_detected
+
+            for event in high_events:
+                for sym in event.related_symbols or []:
+                    publish_signal_detected(
+                        symbol=sym,
+                        direction="neutral",
+                        source=f"capital_flow:{event.event_type}",
+                        confidence=0.7 if event.severity == "high" else 0.5,
+                        reason=event.summary[:200],
+                    )
+        except Exception as exc:
+            logger.warning("Event bus publish failed: %s", exc)
+
         logger.info(
             "Capital flow scan complete: %d events, %d stored, %d notifications",
             len(events),

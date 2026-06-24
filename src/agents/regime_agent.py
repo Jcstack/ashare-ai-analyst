@@ -46,9 +46,11 @@ class RegimeAgent(BaseAgent):
         self._tools = tool_registry
         self._llm = llm_router
         self._system_role = system_role or (
-            "你是一位宏观分析师。判断当前市场所处的 regime（牛市/熊市/震荡/转换期），"
-            "评估宏观环境对 A 股的影响，包括全球市场联动和政策面。"
-            "输出结构化的 regime 判断和宏观风险因子。"
+            "You are a macro analyst. Determine the current market regime "
+            "(bull/bear/sideways/transition), assess the macro environment's impact "
+            "on A-shares including global market correlations and policy factors. "
+            "Output structured regime determination and macro risk factors. "
+            "Write all output text in Chinese."
         )
 
     async def _execute_impl(self, message: AgentMessage) -> AgentMessage:
@@ -160,7 +162,7 @@ class RegimeAgent(BaseAgent):
         parts = [
             self._system_role,
             "",
-            "## 输出规范（JSON格式）",
+            "## Output Format (JSON)",
             "- current_regime: 'bull'/'bear'/'sideways'/'transition'",
             "- regime_confidence: float (0-1)",
             "- transition_matrix: {from_regime: {to_regime: probability}}",

@@ -17,12 +17,20 @@ API) + Google Gemini fallback — configured in `config/llm.yaml`.
 
 ## Architecture
 
-`src/data/` → `src/analysis/` → `src/prediction/` → `src/strategy/` + `src/backtest/`
+**AI-first** (v2): three signal sources → autonomous OODA agent loop → risk gates →
+(simulated) execution, over a Redis-Streams event bus.
 
+`src/data/` (multi-source data) → **signals**: `src/intelligence/` + `src/intelligence_hub/`
+(intel pipeline, knowledge graph), `src/quant/` (HMM regime, alpha, signal library),
+`src/recommendation/` (智能选股) → `src/agent_loop/` (OODA: aggregate → Bayesian prescreen
+→ debate → risk gates → Kelly sizing; InvestmentDirector, ThesisTracker, calibration) →
+`src/risk/` + `src/trading/` (circuit breaker, VaR, gates, A-share constraints — **simulation only**)
+
+- **Event bus** `src/event_bus/` (Redis Streams) · classic analysis `src/analysis/` → `src/prediction/` → `src/strategy/` + `src/backtest/`
 - **Web API** `src/web/` (FastAPI) · **Frontend** `frontend/` (React SPA)
-- **Autonomous agents** `src/agents/`, `src/agent_loop/` · **LLM gateway** `src/llm/`
+- **LLM gateway** `src/llm/` (multi-provider router + Claude Code bridge) · legacy agents `src/agents/`
 - **Market intelligence** `src/market_intelligence/`, `src/intelligence/`
-- **Automation** `openclaw/` (Celery) · **Config** `config/*.yaml`
+- **Automation** `openclaw/` (Celery beat + always-on daemon) · **Config** `config/*.yaml`
 - **Research workstation** `research/` — a separate Claude Code project root with an
   analyst persona (`cd research && claude`; see `research/CLAUDE.md`)
 

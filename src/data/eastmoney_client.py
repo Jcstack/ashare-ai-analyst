@@ -132,12 +132,12 @@ class EastMoneyClient:
 
     AUTH_PORT = 47001
     AUTH_PATH = "/api/akshare-auth"
-    AUTH_VERSION = "0.2.7"
+    AUTH_VERSION = "0.2.13"
 
     def __init__(
         self,
         *,
-        gateway: str = "",
+        gateway: str = "101.201.173.125",
         token: str = "",
         timeout: int = 15,
         max_workers: int = 8,
@@ -186,20 +186,43 @@ class EastMoneyClient:
             return cached
 
         auth_url = f"http://{self._gateway}:{self.AUTH_PORT}{self.AUTH_PATH}"
-        try:
-            session = self._get_session()
-            resp = session.get(
-                auth_url,
-                params={"token": self._token, "version": self.AUTH_VERSION},
-                timeout=5,
-            )
-            data = resp.json()
-            if data.get("ua") and data.get("proxy"):
-                self._auth_cache.set(data)
-                return data
-            logger.warning("Gateway auth failed: %s", data.get("error_msg", "no ua"))
-        except Exception as exc:
-            logger.warning("Gateway auth request failed: %s", exc)
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                session = self._get_session()
+                resp = session.get(
+                    auth_url,
+                    params={"token": self._token, "version": self.AUTH_VERSION},
+                    timeout=8,
+                )
+                # Guard against empty or non-JSON responses
+                if not resp.text or not resp.text.strip():
+                    if attempt < max_attempts - 1:
+                        import time as _time
+
+                        _time.sleep(1.0 * (attempt + 1))
+                        continue
+                    logger.warning(
+                        "Gateway auth returned empty response after %d attempts",
+                        max_attempts,
+                    )
+                    break
+                data = resp.json()
+                if data.get("ua") and data.get("proxy"):
+                    self._auth_cache.set(data)
+                    return data
+                logger.warning(
+                    "Gateway auth failed: %s",
+                    data.get("error_msg", "no ua"),
+                )
+                break  # Got JSON but invalid — don't retry
+            except Exception as exc:
+                if attempt < max_attempts - 1:
+                    import time as _time
+
+                    _time.sleep(1.0 * (attempt + 1))
+                    continue
+                logger.warning("Gateway auth request failed: %s", exc)
 
         # Return stale cache if fresh fetch failed
         return self._auth_cache.data
@@ -227,7 +250,8 @@ class EastMoneyClient:
 
     def _try_direct(self, url: str) -> dict | None:
         try:
-            resp = self._get_session().get(url, timeout=self._timeout)
+            # Short timeout for direct path — fail fast if proxy is blocking
+            resp = self._get_session().get(url, timeout=3)
             if resp.status_code == 200:
                 data = resp.json()
                 if isinstance(data, dict) and data.get("data"):
@@ -403,7 +427,122 @@ class EastMoneyClient:
                 }
             )
         logger.info("EastMoney spot: %d stocks fetched", len(normalised))
+
+        # Fallback: when push2 API is unreachable (geo-blocked),
+        # use AKShare which goes through akshare-proxy-patch.
+        if not normalised:
+            normalised = self._fetch_spot_via_akshare()
+
         return normalised
+
+    @staticmethod
+    def _fetch_spot_via_akshare() -> list[dict]:
+        """Fallback: fetch full market snapshot via AKShare proxy-patch."""
+        try:
+            from src.data.eastmoney_proxy import activate_proxy_patch
+
+            activate_proxy_patch()
+
+            import akshare as ak
+
+            df = ak.stock_zh_a_spot_em()
+            if df is None or df.empty:
+                return []
+
+            stocks: list[dict] = []
+            for _, row in df.iterrows():
+                stocks.append(
+                    {
+                        "symbol": str(row.get("代码", "")),
+                        "name": str(row.get("名称", "")),
+                        "price": float(row.get("最新价", 0) or 0),
+                        "change_pct": float(row.get("涨跌幅", 0) or 0),
+                        "volume": float(row.get("成交量", 0) or 0),
+                        "amount": float(row.get("成交额", 0) or 0),
+                        "volume_ratio": float(row.get("量比", 1) or 1),
+                        "turnover_rate": float(row.get("换手率", 0) or 0),
+                        "amplitude": float(row.get("振幅", 0) or 0),
+                        "high": float(row.get("最高", 0) or 0),
+                        "low": float(row.get("最低", 0) or 0),
+                        "open": float(row.get("今开", 0) or 0),
+                        "prev_close": float(row.get("昨收", 0) or 0),
+                        "pe_ratio": float(row.get("市盈率-动态", 0) or 0),
+                        "market_cap": float(row.get("总市值", 0) or 0),
+                        "sector": "",
+                    }
+                )
+            logger.info("AKShare spot fallback: %d stocks fetched", len(stocks))
+            return stocks
+        except Exception as exc:
+            logger.warning("AKShare spot fallback failed: %s", exc)
+            return []
+
+    def fetch_batch_quotes(self, symbols: list[str]) -> list[dict]:
+        """Fetch realtime quotes for specific symbols via push2 batch API.
+
+        Uses the clist endpoint with a filter string targeting specific secids.
+        Much faster than fetch_spot() which downloads all ~5800 A-shares.
+
+        Args:
+            symbols: List of 6-digit stock codes (e.g. ["600519", "002063"]).
+
+        Returns:
+            List of normalised quote dicts with: symbol, name, price, change,
+            pct_change, open, high, low, prev_close, volume, amount.
+        """
+        if not symbols:
+            return []
+
+        # Build secid filter: 1.6xxxxx for SH, 0.others for SZ/BSE
+        secids = []
+        for sym in symbols:
+            market = "1" if sym.startswith(("6", "9")) else "0"
+            secids.append(f"{market}.{sym}")
+
+        fields = "f2,f3,f4,f5,f6,f12,f14,f15,f16,f17,f18"
+        secids_str = ",".join(secids)
+        url = (
+            f"https://push2.eastmoney.com/api/qt/ulist.np/get"
+            f"?fields={fields}&secids={secids_str}"
+            f"&ut={UT_TOKEN}&fltt=2&invt=2"
+        )
+
+        data = self._request(url)
+        if not data:
+            return []
+
+        diff = data.get("data", {}).get("diff", [])
+        if not diff:
+            return []
+
+        results: list[dict] = []
+        for row in diff:
+            symbol = _safe_str(row.get("f12"))
+            if not symbol:
+                continue
+            price = _safe_float(row.get("f2"))
+            prev_close = _safe_float(row.get("f18"))
+            change = _safe_float(row.get("f4"))
+            pct_change = _safe_float(row.get("f3"))
+            results.append(
+                {
+                    "symbol": symbol,
+                    "name": _safe_str(row.get("f14")),
+                    "price": price or 0,
+                    "change": change,
+                    "pct_change": pct_change,
+                    "open": _safe_float(row.get("f17")),
+                    "high": _safe_float(row.get("f15")),
+                    "low": _safe_float(row.get("f16")),
+                    "prev_close": prev_close,
+                    "volume": _safe_float(row.get("f5")) or 0,
+                    "amount": _safe_float(row.get("f6")),
+                }
+            )
+        logger.debug(
+            "EastMoney batch quotes: %d/%d fetched", len(results), len(symbols)
+        )
+        return results
 
     def fetch_concept_boards(self) -> list[dict]:
         """Fetch concept board list from EastMoney.
@@ -541,7 +680,7 @@ def _create_client() -> EastMoneyClient:
 
     proxy_cfg = config.get("data_sources", {}).get("eastmoney_proxy", {})
     return EastMoneyClient(
-        gateway=proxy_cfg.get("gateway", ""),
+        gateway=proxy_cfg.get("gateway", "101.201.173.125"),
         token=os.environ.get("AKSHARE_PROXY_TOKEN", ""),
         timeout=proxy_cfg.get("timeout", 15),
         max_workers=proxy_cfg.get("max_workers", 8),

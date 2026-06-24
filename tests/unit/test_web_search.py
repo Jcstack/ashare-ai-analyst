@@ -136,27 +136,39 @@ class TestWebSearchService:
     # ------------------------------------------------------------------
 
     def test_import_error_graceful_degradation(self):
-        """Returns error dict when duckduckgo-search is not installed."""
+        """Returns error dict when all search backends are unavailable.
+
+        With the ddgs module removed, ``from ddgs import DDGS`` fails and the
+        DDGS backend degrades to ``None``; SearXNG/Tavily are also unreachable
+        in the test environment, so every backend fails. The service must
+        return the graceful-degradation error dict rather than raising.
+        """
         # Remove the module so `from ddgs import DDGS` fails
         with patch.dict(sys.modules, {"ddgs": None}):
             result = self.svc.search("test query")
 
         assert "error" in result
-        assert "未安装" in result["error"]
+        assert "所有搜索引擎均不可用" in result["error"]
 
     # ------------------------------------------------------------------
     # Search failure
     # ------------------------------------------------------------------
 
     def test_search_exception_returns_error(self):
-        """Search exceptions are caught and returned as error dict."""
+        """Search exceptions are caught and surfaced as an error dict.
+
+        A backend that raises (here DDGS raising on ``text()``) must be caught
+        and degrade to ``None`` rather than propagating. With no other backend
+        reachable in the test environment, ``search`` returns the
+        graceful-degradation error dict instead of raising.
+        """
         mock_cls, _ = _make_mock_ddgs(text_side_effect=RuntimeError("Network timeout"))
 
         with _patch_ddgs(mock_cls):
             result = self.svc.search("test query")
 
         assert "error" in result
-        assert "Network timeout" in result["error"]
+        assert "所有搜索引擎均不可用" in result["error"]
 
     # ------------------------------------------------------------------
     # max_results cap

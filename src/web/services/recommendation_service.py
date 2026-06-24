@@ -16,7 +16,6 @@ from src.recommendation.models import Recommendation
 from src.recommendation.rec_store import RecStore
 from src.recommendation.review_agent import ReviewAgent
 from src.recommendation.screener import StockScreener
-from src.recommendation.session_strategies import SessionStrategyRouter
 from src.web.services.user_config_service import UserConfigService
 
 logger = logging.getLogger(__name__)
@@ -35,7 +34,6 @@ class RecommendationService:
         review_agent: ReviewAgent,
         user_config_service: UserConfigService,
         redis_client: Any | None = None,
-        session_router: SessionStrategyRouter | None = None,
         *,
         info_store: Any | None = None,
         realtime_quote_manager: Any | None = None,
@@ -47,7 +45,6 @@ class RecommendationService:
         self._agent = review_agent
         self._user_config = user_config_service
         self._redis = redis_client
-        self._session_router = session_router
         self._info_store = info_store
         self._quote_manager = realtime_quote_manager
         self._macro_radar = macro_radar
@@ -224,14 +221,9 @@ class RecommendationService:
         user_style_config = self._user_config.get_investment_style_config()
         blacklist = set(user_style_config.get("blacklist", []))
 
-        # Step 1: Screen candidates (with session strategy if available)
+        # Step 1: Screen candidates
         try:
-            if self._session_router:
-                candidates = self._session_router.screen_for_session(
-                    style, session, blacklist=blacklist
-                )
-            else:
-                candidates = self._screener.screen(style, blacklist=blacklist)
+            candidates = self._screener.screen(style, blacklist=blacklist)
         except Exception as exc:
             logger.error("Screening failed for style=%s: %s", style, exc)
             if run_id:
@@ -350,6 +342,45 @@ class RecommendationService:
         recs = self._store.get_today_recommendations(style=style)
         result = self._deduplicate_by_symbol(recs)
         return self._enrich_with_current_prices(result)
+
+    # Numeric confidence mapping for downstream signal consumers
+    # (the agent loop's SignalAggregator expects a float in [0, 1]).
+    _CONFIDENCE_SCORE: dict[str, float] = {
+        "high": 0.85,
+        "medium": 0.55,
+        "low": 0.3,
+    }
+
+    def get_latest_recommendations(self) -> list[dict[str, Any]]:
+        """Return today's recommendations shaped for the agent signal feed.
+
+        The agent loop's ``SignalAggregator.add_from_recommendation`` expects a
+        ``reasoning`` key and a numeric ``confidence`` in ``[0, 1]``, whereas the
+        backend rec dicts use ``reason`` and a categorical ``confidence``
+        (``"high"``/``"medium"``/``"low"``). This adapter bridges the two shapes
+        so the recommendation signal source feeds the trading loop.
+        """
+        recs = self.get_today_recommendations()
+        feed: list[dict[str, Any]] = []
+        for rec in recs:
+            raw_conf = rec.get("confidence")
+            if isinstance(raw_conf, int | float):
+                confidence = float(raw_conf)
+            else:
+                confidence = self._CONFIDENCE_SCORE.get(str(raw_conf).lower(), 0.0)
+            feed.append(
+                {
+                    "symbol": rec.get("symbol"),
+                    "name": rec.get("name", ""),
+                    "score": rec.get("score"),
+                    "confidence": confidence,
+                    "reasoning": rec.get("reason", ""),
+                    "entry_price": rec.get("entry_price"),
+                    "target_price": rec.get("target_price"),
+                    "stop_loss": rec.get("stop_loss"),
+                }
+            )
+        return feed
 
     def get_user_style(self) -> str:
         """Get user's preferred investment style."""

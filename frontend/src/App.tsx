@@ -10,18 +10,14 @@ import { useRealtimeQuotes, useMarketIndices } from "@/hooks/useMarket"
 import { useRealtimeWS } from "@/hooks/useRealtimeWS"
 import { useWatchlist } from "@/hooks/useStocks"
 import { usePortfolio } from "@/hooks/usePortfolio"
-import Dashboard from "@/pages/Dashboard"
+import ControlTower from "@/pages/ControlTower"
 import StockDetail from "@/pages/StockDetail"
 import Settings from "@/pages/Settings"
-import Market from "@/pages/Market"
 import Portfolio from "@/pages/Portfolio"
-import Intelligence from "@/pages/Intelligence"
-import IntelligenceHub from "@/pages/IntelligenceHub"
-import IntelReports from "@/pages/IntelReports"
+import Review from "@/pages/Review"
+import SignalDetail from "@/pages/SignalDetail"
+import AiNews from "@/pages/AiNews"
 import Recommendations from "@/pages/Recommendations"
-import CIODashboard from "@/pages/CIODashboard"
-import AgentDashboard from "@/pages/AgentDashboard"
-import TradeHistory from "@/pages/TradeHistory"
 
 /** Global realtime provider — WS push (auto-degrades to SSE), with HTTP polling safety net. */
 function GlobalRealtimeProvider() {
@@ -82,17 +78,13 @@ function App() {
         <DisclaimerDialog />
         <Routes>
           <Route element={<Layout />}>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<ControlTower />} />
             <Route path="/portfolio" element={<Portfolio />} />
-            <Route path="/market" element={<Market />} />
-            <Route path="/intelligence" element={<Intelligence />} />
-            <Route path="/info-hub" element={<IntelligenceHub />} />
-            <Route path="/recommendations" element={<Recommendations />} />
-            <Route path="/cio" element={<CIODashboard />} />
-            <Route path="/agent" element={<AgentDashboard />} />
-            <Route path="/trades" element={<TradeHistory />} />
-            <Route path="/reports" element={<IntelReports />} />
+            <Route path="/review" element={<Review />} />
+            <Route path="/signal/:id" element={<SignalDetail />} />
             <Route path="/stock/:symbol" element={<StockDetail />} />
+            <Route path="/ai-news" element={<AiNews />} />
+            <Route path="/recommendations" element={<Recommendations />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>

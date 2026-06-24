@@ -65,6 +65,13 @@ class DataPreprocessor:
         result = df.copy()
         initial_len = len(result)
 
+        # Ensure volume column exists (some sources return 'amount' instead)
+        if "volume" not in result.columns:
+            if "amount" in result.columns:
+                result = result.rename(columns={"amount": "volume"})
+            else:
+                result["volume"] = 0
+
         # --- Step 1: Remove suspended days (停牌) -----------------------
         suspended_mask = result["volume"].isna() | (result["volume"] == 0)
         n_suspended = int(suspended_mask.sum())

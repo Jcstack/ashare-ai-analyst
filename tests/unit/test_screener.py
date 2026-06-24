@@ -12,6 +12,29 @@ import pytest
 from src.recommendation.screener import StockScreener, _safe_float
 
 
+@pytest.fixture(autouse=True)
+def _no_screener_network():
+    """Stub the screener's live-network boundaries for deterministic tests.
+
+    ``StockScreener.screen`` touches the network in two places:
+      * the recent-IPO exclusion calls ``_fetch_listing_dates`` →
+        ``akshare.stock_info_a_code_name`` (live), and
+      * candidate enrichment calls
+        ``OvernightRiskCalculator.calculate_batch`` → live OHLCV fetch.
+    Patch both so screening logic is exercised offline and deterministically
+    (matching the graceful empty-result behaviour the screener already handles
+    when these fetches fail).
+    """
+    with (
+        patch.object(StockScreener, "_fetch_listing_dates", return_value={}),
+        patch(
+            "src.recommendation.overnight_risk.OvernightRiskCalculator.calculate_batch",
+            return_value={},
+        ),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

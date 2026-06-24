@@ -12,6 +12,19 @@ guild:
 channel:
   id_env: DISCORD_CHANNEL_ID
 
+# 5-channel alert terminal structure
+# Channel names are looked up by name within the guild.
+channels:
+  trading_alerts: "trading-alerts"
+  risk_alerts: "risk-alerts"
+  morning_brief: "morning-brief"
+  close_review: "close-review"
+  system_health: "system-health"
+
+# Alert rate limiting
+alert_cooldown_seconds: 60
+max_alerts_per_hour: 20
+
 # Push notification types to forward to Discord
 push_types:
   - market_overview
@@ -20,6 +33,14 @@ push_types:
   - intelligence_hub_refresh
   - capital_flow_anomaly
   - risk_alert
+  - trade_signal
+  - morning_briefing
+  - evening_review
+  - close_briefing
+  - thesis_invalidation
+  - regime_change
+  - system_health
+  - intraday_signal
 
 # Embed color palette
 colors:

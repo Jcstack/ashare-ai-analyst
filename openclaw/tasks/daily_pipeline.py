@@ -8,6 +8,7 @@ Per PRD FR-O001: Automated daily data collection pipeline.
 Per PRD FR-O002: Automated analysis and prediction pipeline.
 """
 
+import json
 from typing import Any
 
 from openclaw.celery_app import app
@@ -80,6 +81,51 @@ def _create_notifier() -> Any:
     return DiscordNotifier()
 
 
+def _get_watchlist() -> list[dict[str, str]]:
+    """Load the watchlist from SQLite, merging portfolio positions.
+
+    Falls back to ``config/stocks.yaml`` if the SQLite sources are empty.
+    """
+    watchlist: list[dict[str, str]] = []
+
+    # 1. SQLite WatchlistService (primary source)
+    try:
+        from src.web.services.watchlist_service import WatchlistService
+
+        wl_svc = WatchlistService()
+        watchlist = wl_svc.list_all()
+    except Exception as exc:
+        logger.warning("Could not read SQLite watchlist: %s", exc)
+
+    # 2. Merge portfolio positions so held stocks are always included
+    try:
+        from src.web.services.portfolio_store import PortfolioStore
+
+        store = PortfolioStore(capital_service=None)
+        positions = store.list_positions()
+        existing = {item["symbol"] for item in watchlist}
+        for pos in positions:
+            sym = pos.get("symbol", "")
+            if sym and sym not in existing:
+                watchlist.append(
+                    {
+                        "symbol": sym,
+                        "name": pos.get("name", sym),
+                        "board": pos.get("board", "main"),
+                    }
+                )
+                existing.add(sym)
+    except Exception as exc:
+        logger.warning("Could not merge portfolio positions into watchlist: %s", exc)
+
+    # 3. Fallback to YAML config
+    if not watchlist:
+        stocks_config = load_config("stocks")
+        watchlist = stocks_config.get("watchlist", [])
+
+    return watchlist
+
+
 @app.task(bind=True, max_retries=3, name="openclaw.tasks.daily_pipeline.task_fetch_all")
 def task_fetch_all(self: Any) -> dict[str, str]:
     """Fetch and preprocess daily OHLCV data for all watchlist stocks.
@@ -125,9 +171,7 @@ def task_fetch_all(self: Any) -> dict[str, str]:
         # Preprocess all fetched data
         processed_data = preprocessor.process_all(raw_data)
 
-        results: dict[str, str] = {
-            symbol: "fetched" for symbol in processed_data
-        }
+        results: dict[str, str] = {symbol: "fetched" for symbol in processed_data}
 
         logger.info(
             "task_fetch_all: completed successfully — %d symbols fetched",
@@ -151,7 +195,9 @@ def task_fetch_all(self: Any) -> dict[str, str]:
         raise self.retry(exc=exc, countdown=retry_delay)
 
 
-@app.task(bind=True, max_retries=3, name="openclaw.tasks.daily_pipeline.task_analyze_all")
+@app.task(
+    bind=True, max_retries=3, name="openclaw.tasks.daily_pipeline.task_analyze_all"
+)
 def task_analyze_all(self: Any) -> dict[str, dict[str, Any]]:
     """Run technical analysis on all watchlist stocks.
 
@@ -190,8 +236,7 @@ def task_analyze_all(self: Any) -> dict[str, dict[str, Any]]:
         indicators = TechnicalIndicators()
         pattern_recognizer = PatternRecognizer()
 
-        stocks_config = load_config("stocks")
-        watchlist: list[dict[str, str]] = stocks_config.get("watchlist", [])
+        watchlist = _get_watchlist()
 
         results: dict[str, dict[str, Any]] = {}
 
@@ -216,18 +261,14 @@ def task_analyze_all(self: Any) -> dict[str, dict[str, Any]]:
                 )
 
                 # Support/Resistance levels
-                sr_levels = pattern_recognizer.find_support_resistance(
-                    df_with_patterns
-                )
+                sr_levels = pattern_recognizer.find_support_resistance(df_with_patterns)
 
                 # Count detected patterns (columns starting with "pattern_")
                 pattern_cols = [
-                    c for c in df_with_patterns.columns
-                    if c.startswith("pattern_")
+                    c for c in df_with_patterns.columns if c.startswith("pattern_")
                 ]
                 patterns_detected = sum(
-                    int(df_with_patterns[col].any())
-                    for col in pattern_cols
+                    int(df_with_patterns[col].any()) for col in pattern_cols
                 )
 
                 results[symbol] = {
@@ -237,9 +278,7 @@ def task_analyze_all(self: Any) -> dict[str, dict[str, Any]]:
                 }
 
             except Exception as sym_exc:
-                logger.error(
-                    "Analysis failed for %s (%s): %s", symbol, name, sym_exc
-                )
+                logger.error("Analysis failed for %s (%s): %s", symbol, name, sym_exc)
                 results[symbol] = {
                     "indicators_added": False,
                     "patterns_detected": 0,
@@ -260,7 +299,9 @@ def task_analyze_all(self: Any) -> dict[str, dict[str, Any]]:
         raise self.retry(exc=exc, countdown=retry_delay)
 
 
-@app.task(bind=True, max_retries=3, name="openclaw.tasks.daily_pipeline.task_predict_all")
+@app.task(
+    bind=True, max_retries=3, name="openclaw.tasks.daily_pipeline.task_predict_all"
+)
 def task_predict_all(self: Any) -> dict[str, dict[str, Any]]:
     """Generate AI predictions for all watchlist stocks.
 
@@ -300,8 +341,7 @@ def task_predict_all(self: Any) -> dict[str, dict[str, Any]]:
         pattern_recognizer = PatternRecognizer()
         analyzer = StockAnalyzer()
 
-        stocks_config = load_config("stocks")
-        watchlist: list[dict[str, str]] = stocks_config.get("watchlist", [])
+        watchlist = _get_watchlist()
 
         predictions: dict[str, dict[str, Any]] = {}
         summary_results: list[dict[str, Any]] = []
@@ -327,9 +367,7 @@ def task_predict_all(self: Any) -> dict[str, dict[str, Any]]:
                 )
 
                 # Find S/R levels
-                sr_levels = pattern_recognizer.find_support_resistance(
-                    df_with_patterns
-                )
+                sr_levels = pattern_recognizer.find_support_resistance(df_with_patterns)
 
                 # Extract indicator values from last row for the prompt
                 last_row = df_with_patterns.iloc[-1]
@@ -340,16 +378,21 @@ def task_predict_all(self: Any) -> dict[str, dict[str, Any]]:
                         else last_row[col]
                     )
                     for col in df_with_patterns.columns
-                    if col not in (
-                        "date", "open", "high", "low", "close",
-                        "volume", "amount",
+                    if col
+                    not in (
+                        "date",
+                        "open",
+                        "high",
+                        "low",
+                        "close",
+                        "volume",
+                        "amount",
                     )
                 }
 
                 # Extract active pattern signals
                 pattern_cols = [
-                    c for c in df_with_patterns.columns
-                    if c.startswith("pattern_")
+                    c for c in df_with_patterns.columns if c.startswith("pattern_")
                 ]
                 active_patterns: list[dict[str, Any]] = [
                     {"name": col, "value": float(last_row[col])}
@@ -372,18 +415,38 @@ def task_predict_all(self: Any) -> dict[str, dict[str, Any]]:
                 notifier.send_analysis_alert(symbol=symbol, prediction=prediction)
 
                 # Collect for daily summary
-                summary_results.append({
-                    "symbol": symbol,
-                    "signal": prediction.get("signal", "N/A"),
-                    "confidence": prediction.get("confidence", 0.0),
-                })
+                summary_results.append(
+                    {
+                        "symbol": symbol,
+                        "signal": prediction.get("signal", "N/A"),
+                        "confidence": prediction.get("confidence", 0.0),
+                    }
+                )
 
             except Exception as sym_exc:
                 logger.error(
                     "Prediction failed for %s (%s): %s",
-                    symbol, name, sym_exc,
+                    symbol,
+                    name,
+                    sym_exc,
                 )
                 predictions[symbol] = {"error": str(sym_exc)}
+
+        # Persist predictions to Redis for HeartbeatAgent consumption
+        try:
+            import redis as _redis
+
+            r = _redis.Redis(host="redis", port=6379, db=0, decode_responses=True)
+            for sym, pred in predictions.items():
+                if "error" not in pred:
+                    r.set(
+                        f"prediction:{sym}",
+                        json.dumps(pred, ensure_ascii=False, default=str),
+                        ex=86400,  # 24h TTL
+                    )
+            logger.info("Stored %d predictions to Redis", len(predictions))
+        except Exception as redis_exc:
+            logger.warning("Failed to store predictions to Redis: %s", redis_exc)
 
         # Send daily summary notification
         if summary_results:
@@ -402,7 +465,9 @@ def task_predict_all(self: Any) -> dict[str, dict[str, Any]]:
         raise self.retry(exc=exc, countdown=retry_delay)
 
 
-@app.task(bind=True, max_retries=3, name="openclaw.tasks.daily_pipeline.task_weekly_report")
+@app.task(
+    bind=True, max_retries=3, name="openclaw.tasks.daily_pipeline.task_weekly_report"
+)
 def task_weekly_report(
     self: Any,
     evaluations: list[dict[str, Any]] | None = None,
@@ -447,9 +512,7 @@ def task_weekly_report(
 
         # Send report text via Discord
         notifier.send_daily_summary(
-            results=[
-                {"symbol": "周报", "signal": "report", "confidence": 1.0}
-            ]
+            results=[{"symbol": "周报", "signal": "report", "confidence": 1.0}]
         )
 
         logger.info("task_weekly_report: report generated and sent")

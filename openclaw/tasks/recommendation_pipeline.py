@@ -126,7 +126,6 @@ def task_recommendation_generate(
         from src.recommendation.rec_store import RecStore
         from src.recommendation.review_agent import ReviewAgent
         from src.recommendation.screener import StockScreener
-        from src.recommendation.session_strategies import SessionStrategyRouter
         from src.web.services.recommendation_service import RecommendationService
         from src.web.services.user_config_service import UserConfigService
 
@@ -147,7 +146,6 @@ def task_recommendation_generate(
             pass
 
         screener = StockScreener(config, redis_client=redis_client)
-        session_router = SessionStrategyRouter(screener=screener)
 
         # Try to set up LLM router (separated from audit log to avoid
         # unrelated failures killing AI review — see I-074)
@@ -227,7 +225,6 @@ def task_recommendation_generate(
             review_agent=review_agent,
             user_config_service=user_config,
             redis_client=redis_client,
-            session_router=session_router,
             info_store=info_store,
             macro_radar=macro_radar,
             report_store=report_store,

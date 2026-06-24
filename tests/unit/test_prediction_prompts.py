@@ -172,7 +172,7 @@ class TestBuildAnalysisPrompt:
             )
 
         # Check for key instructions
-        assert "A股" in system_content
+        assert "A-share" in system_content
         assert "JSON" in system_content
 
     @patch("src.prediction.prompts.load_config")
@@ -215,8 +215,8 @@ class TestBuildAnalysisPrompt:
         # S/R levels must appear
         assert "10.20" in user_content
         assert "11.50" in user_content
-        assert "支撑位" in user_content
-        assert "阻力位" in user_content
+        assert "Support" in user_content
+        assert "Resistance" in user_content
 
     @patch("src.prediction.prompts.load_config")
     def test_prompt_with_empty_patterns(
@@ -287,10 +287,10 @@ class TestFormatOHLCVSummary:
         assert len(result) > 0
 
         # Should contain header keywords
-        assert "日期" in result
-        assert "开盘" in result
-        assert "收盘" in result
-        assert "成交量" in result
+        assert "Date" in result
+        assert "Open" in result
+        assert "Close" in result
+        assert "Volume" in result
 
         # Should contain data values from sample data
         lines = result.strip().split("\n")
@@ -366,8 +366,8 @@ class TestFormatSRLevels:
         builder = PromptBuilder()
         result = builder._format_sr_levels(sample_sr_levels)
 
-        assert "支撑位" in result
-        assert "阻力位" in result
+        assert "Support" in result
+        assert "Resistance" in result
         assert "10.20" in result
         assert "11.50" in result
 

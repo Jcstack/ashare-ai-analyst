@@ -158,6 +158,7 @@ async def conversation(
                     support_resistance=ctx.support_resistance,
                     dragon_tiger=ctx.dragon_tiger,
                     fund_flow_detail=ctx.fund_flow_detail,
+                    fund_flow_timeline=ctx.fund_flow_timeline,
                     divergence_signals=ctx.divergence_signals,
                 ),
                 timeout=_LLM_TIMEOUT,

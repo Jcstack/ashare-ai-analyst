@@ -1,15 +1,17 @@
-"""Web search service — multi-engine search with rate limiting.
+"""Web search service — multi-backend with automatic fallback.
 
-Provides a lightweight web search capability for the agent to find
-stock-related news and information beyond the local intelligence hub.
-Uses ddgs (v9+) which aggregates results from multiple search engines.
+Backend priority: SearXNG (self-hosted) → Tavily (API) → DDGS (free).
+Rate-limited with a 5-minute sliding window.
 """
 
 from __future__ import annotations
 
+import os
 import time
 from collections import deque
 from typing import Any
+
+import requests
 
 from src.utils.logger import get_logger
 
@@ -20,14 +22,16 @@ _MAX_CALLS = 10  # max calls per window
 _MIN_INTERVAL = 2.0  # seconds between calls
 _SEARCH_TIMEOUT = 15  # seconds per request
 
+# SearXNG defaults — override via env vars
+_SEARXNG_URL = os.getenv("SEARXNG_URL", "http://searxng:8080")
+_TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+
 
 class WebSearchService:
-    """Multi-engine web search (ddgs v9+) with built-in rate limiting.
+    """Multi-backend web search with automatic fallback.
 
-    ddgs v9 aggregates results from DuckDuckGo, Bing, Brave, Google etc.
-    In Docker, set ``DDGS_PROXY`` env var for automatic proxy support.
-    Gracefully degrades if the ``ddgs`` package is not installed or if
-    a search fails at runtime.
+    Priority: SearXNG (self-hosted, no rate limits) → Tavily (API, free
+    tier 1K/month) → DDGS (free, rate-limited).
     """
 
     def __init__(self) -> None:
@@ -46,20 +50,13 @@ class WebSearchService:
         region: str = "cn-zh",
         search_type: str = "text",
     ) -> dict[str, Any]:
-        """Execute a web search and return slim results.
-
-        Args:
-            query: Search query string.
-            max_results: Maximum number of results to return (capped at 10).
-            region: DuckDuckGo region code (default ``cn-zh``).
-            search_type: ``"text"`` for general search, ``"news"`` for news.
+        """Execute a web search with fallback chain.
 
         Returns:
             Dict with ``results`` list on success or ``error`` on failure.
         """
         max_results = min(int(max_results), 10)
 
-        # Rate-limit check
         allowed, cooldown = self._check_rate_limit()
         if not allowed:
             return {
@@ -70,15 +67,134 @@ class WebSearchService:
                 ),
             }
 
+        # Try backends in order
+        errors: list[str] = []
+
+        result = self._search_searxng(query, max_results, search_type)
+        if result is not None:
+            return {
+                "query": query,
+                "type": search_type,
+                "backend": "searxng",
+                "results": result,
+            }
+        errors.append("searxng")
+
+        result = self._search_tavily(query, max_results, search_type)
+        if result is not None:
+            return {
+                "query": query,
+                "type": search_type,
+                "backend": "tavily",
+                "results": result,
+            }
+        errors.append("tavily")
+
+        result = self._search_ddgs(query, max_results, region, search_type)
+        if result is not None:
+            return {
+                "query": query,
+                "type": search_type,
+                "backend": "ddgs",
+                "results": result,
+            }
+        errors.append("ddgs")
+
+        logger.error("All search backends failed: %s", errors)
+        return {"error": "所有搜索引擎均不可用，请稍后再试"}
+
+    # ------------------------------------------------------------------
+    # Backend: SearXNG (self-hosted, primary)
+    # ------------------------------------------------------------------
+
+    def _search_searxng(
+        self, query: str, max_results: int, search_type: str
+    ) -> list[dict[str, str]] | None:
+        """Search via self-hosted SearXNG instance."""
+        try:
+            categories = "news" if search_type == "news" else "general"
+            resp = requests.get(
+                f"{_SEARXNG_URL}/search",
+                params={
+                    "q": query,
+                    "format": "json",
+                    "categories": categories,
+                    "language": "zh-CN",
+                    "pageno": 1,
+                },
+                timeout=_SEARCH_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = []
+            for item in data.get("results", [])[:max_results]:
+                entry: dict[str, str] = {
+                    "title": item.get("title", ""),
+                    "snippet": item.get("content", ""),
+                    "url": item.get("url", ""),
+                }
+                if item.get("publishedDate"):
+                    entry["date"] = item["publishedDate"]
+                results.append(entry)
+            logger.info("SearXNG returned %d results for: %s", len(results), query[:50])
+            return results
+        except Exception as exc:
+            logger.debug("SearXNG unavailable: %s", exc)
+            return None
+
+    # ------------------------------------------------------------------
+    # Backend: Tavily (API, fallback)
+    # ------------------------------------------------------------------
+
+    def _search_tavily(
+        self, query: str, max_results: int, search_type: str
+    ) -> list[dict[str, str]] | None:
+        """Search via Tavily API (free tier: 1K searches/month)."""
+        if not _TAVILY_API_KEY:
+            return None
+        try:
+            resp = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": _TAVILY_API_KEY,
+                    "query": query,
+                    "search_depth": "basic",
+                    "max_results": max_results,
+                    "topic": "news" if search_type == "news" else "general",
+                    "include_answer": False,
+                },
+                timeout=_SEARCH_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = []
+            for item in data.get("results", [])[:max_results]:
+                entry: dict[str, str] = {
+                    "title": item.get("title", ""),
+                    "snippet": item.get("content", ""),
+                    "url": item.get("url", ""),
+                }
+                if item.get("published_date"):
+                    entry["date"] = item["published_date"]
+                results.append(entry)
+            logger.info("Tavily returned %d results for: %s", len(results), query[:50])
+            return results
+        except Exception as exc:
+            logger.debug("Tavily failed: %s", exc)
+            return None
+
+    # ------------------------------------------------------------------
+    # Backend: DDGS (free, last resort)
+    # ------------------------------------------------------------------
+
+    def _search_ddgs(
+        self, query: str, max_results: int, region: str, search_type: str
+    ) -> list[dict[str, str]] | None:
+        """Search via DDGS (DuckDuckGo aggregator)."""
         try:
             from ddgs import DDGS
         except ImportError:
-            return {"error": "联网搜索暂不可用（ddgs 未安装）"}
-
-        try:
-            from ddgs.exceptions import RatelimitException, TimeoutException
-        except ImportError:
-            RatelimitException = TimeoutException = None
+            return None
 
         try:
             with DDGS(timeout=_SEARCH_TIMEOUT) as ddgs:
@@ -101,45 +217,33 @@ class WebSearchService:
                         )
                     )
         except Exception as exc:
-            if RatelimitException and isinstance(exc, RatelimitException):
-                logger.warning("Web search rate-limited by upstream: %s", exc)
-                return {"error": "搜索引擎限频，请稍后再试"}
-            if TimeoutException and isinstance(exc, TimeoutException):
-                logger.warning("Web search timeout (all backends): %s", exc)
-                return {"error": "搜索超时（所有引擎均无响应），请稍后再试"}
-            logger.warning("Web search failed: %s", exc)
-            return {"error": f"搜索失败: {exc}"}
+            logger.debug("DDGS failed: %s", exc)
+            return None
 
         results = []
         for item in raw:
-            entry: dict[str, str] = {}
-            entry["title"] = item.get("title", "")
-            entry["snippet"] = item.get("body", item.get("excerpt", ""))
-            entry["url"] = item.get("href", item.get("url", ""))
+            entry: dict[str, str] = {
+                "title": item.get("title", ""),
+                "snippet": item.get("body", item.get("excerpt", "")),
+                "url": item.get("href", item.get("url", "")),
+            }
             if item.get("date"):
                 entry["date"] = item["date"]
             results.append(entry)
-
-        return {"query": query, "type": search_type, "results": results}
+        logger.info("DDGS returned %d results for: %s", len(results), query[:50])
+        return results
 
     # ------------------------------------------------------------------
     # Rate limiting
     # ------------------------------------------------------------------
 
     def _check_rate_limit(self) -> tuple[bool, int]:
-        """Check if a call is allowed under rate limits.
-
-        Returns:
-            Tuple of (allowed, cooldown_seconds).  When ``allowed`` is False,
-            ``cooldown_seconds`` indicates how long the caller should wait.
-        """
+        """Check if a call is allowed under rate limits."""
         now = time.monotonic()
 
-        # Enforce minimum interval between calls
         if now - self._last_call < _MIN_INTERVAL:
             return False, int(_MIN_INTERVAL - (now - self._last_call)) + 1
 
-        # Sliding window: drop timestamps older than the window
         while self._timestamps and self._timestamps[0] < now - _WINDOW_SECONDS:
             self._timestamps.popleft()
 

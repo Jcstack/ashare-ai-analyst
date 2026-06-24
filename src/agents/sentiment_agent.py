@@ -43,9 +43,11 @@ class SentimentAgent(BaseAgent):
         self._tools = tool_registry
         self._llm = llm_router
         self._system_role = system_role or (
-            "你是一位市场舆情分析师。从新闻和社交媒体数据中提取市场情绪，"
-            "给出量化的情绪评分（-1到+1）和关键事件影响评估。"
-            "保持客观中立，区分噪音和真正有影响力的信息。"
+            "You are a market sentiment analyst. Extract market sentiment from news "
+            "and social media data, providing a quantified sentiment score (-1 to +1) "
+            "and key event impact assessments. "
+            "Remain objective and neutral — distinguish noise from truly impactful information. "
+            "Write all output text in Chinese."
         )
 
     async def _execute_impl(self, message: AgentMessage) -> AgentMessage:
@@ -161,8 +163,8 @@ class SentimentAgent(BaseAgent):
         parts = [
             self._system_role,
             "",
-            "## 输出规范（JSON格式）",
-            "- sentiment_score: float (-1到+1)",
+            "## Output Format (JSON)",
+            "- sentiment_score: float (-1 to +1)",
             "- sentiment_signal: 'bullish'/'neutral'/'bearish'",
             "- key_events: [{event, impact, source}]",
             "- confidence_score: float (0-1)",
@@ -172,5 +174,5 @@ class SentimentAgent(BaseAgent):
         ]
         symbol = message.context.get("symbol")
         if symbol:
-            parts.append(f"\n## 分析目标: {symbol}")
+            parts.append(f"\n## Analysis Target: {symbol}")
         return "\n".join(parts)

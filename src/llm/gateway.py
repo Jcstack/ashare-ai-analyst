@@ -69,6 +69,9 @@ class LLMGateway:
         self._inflight: dict[str, tuple[threading.Event, list]] = {}
         # Caller-based model routing: prefix -> model name
         self._caller_model_map: dict[str, str] = self._load_caller_model_map()
+        self._caller_fallback_map: dict[str, list[str]] = (
+            self._load_caller_fallback_map()
+        )
         # Dynamic upgrade rules: cost model → quality model
         self._upgrade_rules: dict[str, Any] = self._load_upgrade_rules()
         # Grounding config: which callers get Google Search augmentation
@@ -100,6 +103,22 @@ class LLMGateway:
             raw = cfg.get("caller_model_map", {})
             if isinstance(raw, dict):
                 return {str(k): str(v) for k, v in raw.items()}
+        except Exception:
+            pass
+        return {}
+
+    @staticmethod
+    def _load_caller_fallback_map() -> dict[str, list[str]]:
+        """Load caller → fallback model chain from config/llm.yaml."""
+        try:
+            cfg = load_config("llm")
+            raw = cfg.get("caller_fallback_map", {})
+            if isinstance(raw, dict):
+                return {
+                    str(k): [str(v) for v in vals]
+                    for k, vals in raw.items()
+                    if isinstance(vals, list)
+                }
         except Exception:
             pass
         return {}
@@ -226,6 +245,18 @@ class LLMGateway:
                 best_len = len(prefix)
         return best_match
 
+    def _resolve_caller_fallbacks(self, caller: str) -> list[str]:
+        """Resolve fallback model chain for a caller via prefix matching."""
+        if not self._caller_fallback_map or not caller:
+            return []
+        best_match: list[str] = []
+        best_len = 0
+        for prefix, chain in self._caller_fallback_map.items():
+            if caller.startswith(prefix) and len(prefix) > best_len:
+                best_match = chain
+                best_len = len(prefix)
+        return best_match
+
     # ── Core API ─────────────────────────────────────────────
 
     def complete(
@@ -269,9 +300,28 @@ class LLMGateway:
             grounding = self._should_ground(caller)
 
         # Caller-based model routing + dynamic upgrade
-        model_override = self._resolve_caller_model(caller)
+        # Supports "provider:model" syntax (e.g. "claude_code:sonnet")
+        raw_override = self._resolve_caller_model(caller)
+        provider_override = None
+        model_override = raw_override
+        if raw_override and ":" in raw_override:
+            parts = raw_override.split(":", 1)
+            try:
+                from src.llm.base import ProviderName
+
+                provider_override = ProviderName(parts[0])
+                model_override = parts[1]
+            except (ValueError, IndexError):
+                model_override = raw_override  # fallback: treat as model name
         if model_override:
-            logger.debug("Caller %s → model override: %s", caller, model_override)
+            logger.debug(
+                "Caller %s → model=%s provider=%s",
+                caller,
+                model_override,
+                provider_override,
+            )
+        if preferred_provider is None and provider_override is not None:
+            preferred_provider = provider_override
         model_override = self._maybe_upgrade_model(model_override, messages)
 
         # In-flight dedup: if an identical request is already running,
@@ -314,15 +364,49 @@ class LLMGateway:
             )
             container.append(response)
             return response
-        except LLMProviderError as exc:
-            error_msg = str(exc)
-            container.append(exc)
-            raise
-        except Exception as exc:
-            error_msg = str(exc)
-            wrapped = LLMProviderError(f"Gateway error ({caller}): {exc}")
+        except (LLMProviderError, Exception) as primary_exc:
+            # Try caller-specific fallback chain before giving up
+            fallbacks = self._resolve_caller_fallbacks(caller)
+            for fb in fallbacks:
+                fb_provider = None
+                fb_model = fb
+                if ":" in fb:
+                    parts = fb.split(":", 1)
+                    try:
+                        from src.llm.base import ProviderName as _PN
+
+                        fb_provider = _PN(parts[0])
+                        fb_model = parts[1]
+                    except (ValueError, IndexError):
+                        fb_model = fb
+                logger.warning(
+                    "Caller %s primary failed, trying fallback: %s",
+                    caller,
+                    fb,
+                )
+                try:
+                    response = self._router.complete(
+                        messages=messages,
+                        strategy=strategy,
+                        preferred_provider=fb_provider,
+                        model=fb_model,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        symbol=symbol,
+                        analysis_type=analysis_type,
+                    )
+                    container.append(response)
+                    return response
+                except Exception:
+                    continue
+
+            error_msg = str(primary_exc)
+            if isinstance(primary_exc, LLMProviderError):
+                container.append(primary_exc)
+                raise
+            wrapped = LLMProviderError(f"Gateway error ({caller}): {primary_exc}")
             container.append(wrapped)
-            raise wrapped from exc
+            raise wrapped from primary_exc
         finally:
             event.set()
             with self._dedup_lock:
@@ -376,6 +460,20 @@ class LLMGateway:
             model_override = model
         else:
             model_override = self._resolve_caller_model(caller)
+
+        # Split "provider:model" syntax (e.g. "openai:gpt-5.4-mini")
+        if model_override and ":" in model_override:
+            parts = model_override.split(":", 1)
+            try:
+                from src.llm.base import ProviderName as _PN
+
+                provider_hint = _PN(parts[0])
+                model_override = parts[1]
+                if preferred_provider is None:
+                    preferred_provider = provider_hint
+            except (ValueError, IndexError):
+                pass  # not a valid provider prefix, keep as-is
+
         model_override = self._maybe_upgrade_model(model_override, messages)
 
         start = time.perf_counter()

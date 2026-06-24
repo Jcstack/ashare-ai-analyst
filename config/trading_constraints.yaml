@@ -12,7 +12,7 @@ overnight_risk_mandatory: true
 
 # Ultra-short-term constraints
 max_hold_days: 3              # Warn if held > 3 days
-max_single_position_pct: 30.0 # Max 30% per stock
+max_single_position_pct: 100.0 # Conviction-based — Agent decides, not hard cap
 max_intraday_chase_pct: 5.0   # Don't chase if already up > 5% today
 min_daily_turnover_wan: 5000  # Min avg daily turnover (万元)
 

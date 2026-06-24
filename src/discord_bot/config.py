@@ -11,6 +11,15 @@ from src.utils.logger import get_logger
 
 logger = get_logger("discord.config")
 
+# 5-channel alert terminal structure
+CHANNELS: dict[str, str] = {
+    "trading_alerts": "trading-alerts",
+    "risk_alerts": "risk-alerts",
+    "morning_brief": "morning-brief",
+    "close_review": "close-review",
+    "system_health": "system-health",
+}
+
 
 @lru_cache(maxsize=1)
 def get_discord_config() -> dict[str, Any]:
@@ -22,6 +31,21 @@ def get_timeout(key: str, default: int = 300) -> int:
     """Read a timeout value from ``config/discord.yaml`` rate_limits section."""
     cfg = get_discord_config()
     return cfg.get("rate_limits", {}).get(key, default)
+
+
+def get_channel_names() -> dict[str, str]:
+    """Return channel key → channel name mapping.
+
+    Reads from ``config/discord.yaml`` channels section, falling back to
+    the ``CHANNELS`` default if a key is missing.
+    """
+    cfg = get_discord_config()
+    channels_cfg = cfg.get("channels", {})
+    result = CHANNELS.copy()
+    for key in CHANNELS:
+        if key in channels_cfg:
+            result[key] = channels_cfg[key]
+    return result
 
 
 def load_discord_config() -> dict[str, Any]:

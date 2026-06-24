@@ -30,7 +30,9 @@ _COG_MODULES = [
     "src.discord_bot.cogs.global_market_commands",
     "src.discord_bot.cogs.concept_commands",
     "src.discord_bot.cogs.agent_commands",
+    "src.discord_bot.cogs.channel_router",
     "src.discord_bot.cogs.push_notifications",
+    "src.discord_bot.cogs.assistant_push",
     "src.discord_bot.cogs.natural_language",
 ]
 

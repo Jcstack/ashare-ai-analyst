@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback } from "react"
-import { Plus, Sparkles, TrendingUp, Loader2 } from "lucide-react"
+import { Link } from "react-router-dom"
+import { Plus, Sparkles, TrendingUp, Loader2, Shield, AlertTriangle, Target } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -8,6 +10,7 @@ import { usePortfolio, computePortfolioSummary } from "@/hooks/usePortfolio"
 import { usePortfolioDiagnosis } from "@/hooks/usePortfolioDiagnosis"
 import { useRealtimeQuotes } from "@/hooks/useMarket"
 import { useAddToWatchlist, useWatchlist } from "@/hooks/useStocks"
+import { useTheses } from "@/hooks/useActions"
 import { CapitalOverview } from "@/components/portfolio/CapitalOverview"
 import { PortfolioSummaryCards } from "@/components/portfolio/PortfolioSummaryCards"
 import { PositionTable } from "@/components/portfolio/PositionTable"
@@ -20,9 +23,11 @@ import { WatchlistTabContent } from "@/components/portfolio/WatchlistTabContent"
 import { TradeDialog } from "@/components/trade/TradeDialog"
 import type { TradeContext } from "@/components/trade/TradeDialog"
 import { useMarketStatus } from "@/hooks/useMarketStatus"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import type { RealtimeQuote } from "@/types/market"
 import type { Position, PositionWithPnL } from "@/types/portfolio"
+import type { Thesis } from "@/types/action"
 
 export default function Portfolio() {
   const { positions, isEmpty, isLoading, addPosition, updatePosition, liquidatePosition } =
@@ -39,7 +44,11 @@ export default function Portfolio() {
   const addWatchlistMutation = useAddToWatchlist()
   const { data: marketStatus } = useMarketStatus()
 
-  const { data: realtimeData } = useRealtimeQuotes()
+  // Fetch realtime quotes for portfolio positions specifically (not just watchlist)
+  const positionSymbols = useMemo(() => positions.map((p) => p.symbol), [positions])
+  const { data: realtimeData } = useRealtimeQuotes(
+    positionSymbols.length > 0 ? positionSymbols : undefined,
+  )
 
   const realtimeMap = useMemo(
     () => new Map<string, RealtimeQuote>(realtimeData?.map((q) => [q.symbol, q]) ?? []),
@@ -52,6 +61,14 @@ export default function Portfolio() {
   )
 
   const diagnosis = usePortfolioDiagnosis()
+  const { data: theses } = useTheses()
+
+  // Build thesis map for position enrichment
+  const thesisMap = useMemo(() => {
+    const map = new Map<string, Thesis>()
+    theses?.forEach((t) => map.set(t.symbol, t))
+    return map
+  }, [theses])
 
   // Show tabs when there are positions OR watchlist items
   const showTabs = !isEmpty || watchlist.length > 0
@@ -216,6 +233,8 @@ export default function Portfolio() {
       <CapitalOverview
         key={capitalVersion}
         realtimePositionValue={summary.totalMarketValue || undefined}
+        floatingPnL={summary.totalPnL}
+        floatingPnLPercent={summary.totalPnLPercent}
       />
 
       {!showTabs ? (
@@ -263,6 +282,61 @@ export default function Portfolio() {
                             <StrategyInsightBadge symbol={p.symbol} />
                           </div>
                         ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Thesis Status per Position */}
+                {theses && theses.length > 0 && (
+                  <Card>
+                    <CardHeader className="py-3 px-4">
+                      <div className="flex items-center gap-2">
+                        <Target className="h-4 w-4 text-primary" />
+                        <CardTitle className="text-title">投资论点状态</CardTitle>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3">
+                      <div className="space-y-2">
+                        {positions.map((p) => {
+                          const thesis = thesisMap.get(p.symbol)
+                          if (!thesis) return null
+                          const statusCfg = {
+                            active: { label: "有效", color: "text-green-500", icon: Shield },
+                            weakening: { label: "弱化", color: "text-yellow-500", icon: AlertTriangle },
+                            invalidated: { label: "失效", color: "text-red-500", icon: AlertTriangle },
+                            realized: { label: "已实现", color: "text-blue-500", icon: Shield },
+                          }[thesis.status]
+                          const daysRemaining = thesis.expires_at
+                            ? Math.max(0, Math.ceil((new Date(thesis.expires_at).getTime() - Date.now()) / 86400000))
+                            : null
+                          const StatusIcon = statusCfg.icon
+                          return (
+                            <div key={p.id} className="flex items-center gap-3 rounded-lg border px-3 py-2">
+                              <Link
+                                to={`/stock/${p.symbol}?from=portfolio`}
+                                className="text-sm font-medium hover:text-primary transition-colors min-w-[80px]"
+                              >
+                                {p.name}
+                              </Link>
+                              <Badge variant="outline" className={cn("text-[10px] gap-1", statusCfg.color)}>
+                                <StatusIcon className="h-3 w-3" />
+                                {statusCfg.label}
+                              </Badge>
+                              <span className="text-xs font-numeric text-muted-foreground">
+                                置信度 {Math.round(thesis.current_confidence * 100)}%
+                              </span>
+                              {daysRemaining != null && (
+                                <span className="text-xs text-muted-foreground">
+                                  剩余 {daysRemaining} 天
+                                </span>
+                              )}
+                              <span className="flex-1 text-xs text-muted-foreground truncate text-right">
+                                {thesis.invalidation_condition}
+                              </span>
+                            </div>
+                          )
+                        })}
                       </div>
                     </CardContent>
                   </Card>

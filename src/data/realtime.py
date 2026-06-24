@@ -28,10 +28,13 @@ logger = get_logger("data.realtime")
 
 # Exchange prefix pattern (sh/sz/bj) — strip to get bare 6-digit code
 _EXCHANGE_PREFIX_RE = re.compile(r"^(sh|sz|bj)", re.IGNORECASE)
+# Exchange suffix pattern (.SZ/.SH/.BJ)
+_EXCHANGE_SUFFIX_RE = re.compile(r"\.(SZ|SH|BJ)$", re.IGNORECASE)
 
 
 def _normalize_symbol(sym: str) -> str:
-    """Strip exchange prefix (sh/sz/bj) to get bare 6-digit code."""
+    """Strip exchange prefix/suffix to get bare 6-digit code."""
+    sym = _EXCHANGE_SUFFIX_RE.sub("", sym)
     return _EXCHANGE_PREFIX_RE.sub("", sym)
 
 
@@ -163,7 +166,20 @@ class RealtimeQuoteManager:
         self,
         symbols: list[str],
     ) -> list[dict[str, Any]]:
-        """Fetch quotes using source priority with fallback."""
+        """Fetch quotes using source priority with fallback.
+
+        Priority: EastMoney push2 (fastest, most reliable) → QMT → Sina → Xueqiu → adata.
+        """
+        # EastMoney push2 — try first, outside source_router loop for speed
+        try:
+            result = self._fetch_eastmoney_batch(symbols)
+            if result:
+                self._source_router.record_success(SourceDomain.EASTMONEY_PUSH2)
+                return result
+        except Exception as exc:
+            logger.warning("EastMoney push2 realtime failed: %s", exc)
+            self._source_router.record_failure(SourceDomain.EASTMONEY_PUSH2)
+
         sources = self._source_router.get_realtime_sources()
 
         for source in sources:
@@ -193,6 +209,24 @@ class RealtimeQuoteManager:
             len(symbols),
         )
         return []
+
+    def _fetch_eastmoney_batch(
+        self,
+        symbols: list[str],
+    ) -> list[dict[str, Any]]:
+        """Fetch quotes from EastMoney push2 via EastMoneyClient.
+
+        Uses the batch quote API — single HTTP request for all symbols.
+        Direct access (~0.1s), no AKShare monkey-patch dependency.
+        """
+        try:
+            from src.data.eastmoney_client import get_eastmoney_client
+
+            client = get_eastmoney_client()
+        except Exception:
+            return []
+
+        return client.fetch_batch_quotes(symbols)
 
     def _ensure_sina_session(self) -> _requests.Session:
         """Lazily initialize a Sina hq.sinajs.cn session."""
@@ -228,11 +262,18 @@ class RealtimeQuoteManager:
         for batch in batches:
             self._rate_limit_wait()
 
-            # Build Sina symbol list: 6xxxxx→sh6xxxxx, others→sz
+            # Build Sina symbol list: 6xxxxx→sh6xxxxx, others→sz.
+            # Only accept 6-digit numeric A-share codes; this also prevents
+            # any untrusted value from tainting the request URL (SSRF).
             sina_syms = []
             for sym in batch:
+                if not re.fullmatch(r"\d{6}", sym):
+                    continue
                 prefix = "sh" if sym.startswith(("6", "9")) else "sz"
                 sina_syms.append(f"{prefix}{sym}")
+
+            if not sina_syms:
+                continue
 
             url = f"https://hq.sinajs.cn/list={','.join(sina_syms)}"
             try:

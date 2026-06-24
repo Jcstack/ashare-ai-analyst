@@ -37,9 +37,13 @@ function formatMoney(n: number): string {
 interface CapitalOverviewProps {
   /** Real-time portfolio market value from useRealtimeQuotes. Overrides backend cost-based value. */
   realtimePositionValue?: number
+  /** Floating P&L = market value - cost basis. */
+  floatingPnL?: number
+  /** Floating P&L percentage. */
+  floatingPnLPercent?: number
 }
 
-export function CapitalOverview({ realtimePositionValue }: CapitalOverviewProps) {
+export function CapitalOverview({ realtimePositionValue, floatingPnL, floatingPnLPercent }: CapitalOverviewProps) {
   const [data, setData] = useState<CapitalBreakdown | null>(null)
   const [loading, setLoading] = useState(true)
   const [risk, setRisk] = useState("moderate")
@@ -191,24 +195,32 @@ export function CapitalOverview({ realtimePositionValue }: CapitalOverviewProps)
   // Use real-time position value from frontend when available (fixes I-007)
   const positionValue = realtimePositionValue ?? data.position_value
   const totalAssets = data.available_cash + positionValue
-  const utilizationRate = totalAssets > 0 ? positionValue / totalAssets : 0
+
+  const pnl = floatingPnL ?? 0
+  const pnlPct = floatingPnLPercent ?? 0
+  const pnlSign = pnl >= 0 ? "+" : ""
+  const pnlColor = pnl > 0 ? "var(--color-market-up)" : pnl < 0 ? "var(--color-market-down)" : undefined
 
   const stats = [
     {
       label: "总资产",
       value: `¥${formatMoney(totalAssets)}`,
+      color: undefined as string | undefined,
     },
     {
       label: "可用现金",
       value: `¥${formatMoney(data.available_cash)}`,
+      color: undefined as string | undefined,
     },
     {
       label: "持仓市值",
       value: `¥${formatMoney(positionValue)}`,
+      color: undefined as string | undefined,
     },
     {
-      label: "资金使用率",
-      value: `${(utilizationRate * 100).toFixed(1)}%`,
+      label: "浮动盈亏",
+      value: `${pnlSign}¥${formatMoney(Math.abs(pnl))} (${pnlSign}${pnlPct.toFixed(2)}%)`,
+      color: pnlColor,
     },
   ]
 
@@ -270,7 +282,10 @@ export function CapitalOverview({ realtimePositionValue }: CapitalOverviewProps)
             {stats.map((s) => (
               <div key={s.label}>
                 <p className="text-xs text-muted-foreground">{s.label}</p>
-                <p className="text-lg font-bold mt-0.5 font-numeric">
+                <p
+                  className="text-lg font-bold mt-0.5 font-numeric"
+                  style={s.color ? { color: s.color } : undefined}
+                >
                   {s.value}
                 </p>
               </div>

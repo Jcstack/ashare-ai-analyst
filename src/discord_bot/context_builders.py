@@ -8,6 +8,7 @@ result, and *thread_context_kwargs* is a dict suitable for constructing a
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 
@@ -216,6 +217,98 @@ def concept_context(
         parts.append(f"- {name}: {pct}%")
 
     return "\n".join(parts), {"mode": "market"}
+
+
+def build_scheduled_push_context(payload: dict[str, Any], push_type: str) -> str:
+    """Build conversation context from a scheduled push notification.
+
+    This context is injected into the Thread conversation when a user
+    clicks "深入分析" on a push notification.
+    """
+    parts: list[str] = []
+
+    # -- Push type header --
+    _TYPE_LABELS: dict[str, str] = {
+        "pre_market": "盘前情报",
+        "call_auction": "集合竞价分析",
+        "intraday_signal": "盘中信号",
+        "late_session": "尾盘决策推荐",
+        "post_market": "盘后复盘",
+        "holiday_intel": "假期情报",
+        "buy_signal": "买入信号",
+        "sell_signal": "卖出信号",
+        "risk_alert": "风险警报",
+        "market_watch": "市场观察",
+    }
+    label = _TYPE_LABELS.get(push_type, push_type)
+    parts.append(f"[推送类型] {label}")
+
+    # -- Full payload data (compact JSON for AI context) --
+    # Filter out internal fields, keep only data
+    context_data = {
+        k: v for k, v in payload.items() if k not in ("type",) and v is not None
+    }
+    if context_data:
+        parts.append(
+            f"[推送数据]\n{json.dumps(context_data, ensure_ascii=False, indent=2)}"
+        )
+
+    # -- Type-specific summaries for readability --
+    if push_type == "late_session":
+        recs = payload.get("recommendations", [])
+        if recs:
+            parts.append(f"[推荐数量] {len(recs)} 只股票")
+            for i, rec in enumerate(recs[:3], 1):
+                sym = rec.get("symbol", "?")
+                name = rec.get("name", sym)
+                entry = rec.get("entry_range", "")
+                parts.append(f"  推荐{i}: {name}({sym}) 买入区间: {entry}")
+        risk = payload.get("risk_warning")
+        if risk:
+            parts.append(f"[风险提示] {risk}")
+
+    elif push_type in ("pre_market", "call_auction"):
+        tone = payload.get("tone")
+        if tone:
+            parts.append(f"[今日基调] {tone}")
+        overnight = payload.get("overnight")
+        if overnight:
+            parts.append(f"[隔夜市场] {str(overnight)[:200]}")
+
+    elif push_type == "post_market":
+        pnl = payload.get("pnl_summary")
+        if pnl:
+            parts.append(f"[今日盈亏] {pnl}")
+        accuracy = payload.get("accuracy")
+        if accuracy:
+            parts.append(f"[命中率] {accuracy}")
+
+    elif push_type == "holiday_intel":
+        date_str = payload.get("date", "")
+        if date_str:
+            parts.append(f"[日期] {date_str}")
+
+    elif push_type == "intraday_signal":
+        session = payload.get("session_label", "")
+        if session:
+            parts.append(f"[时段] {session}")
+
+    # -- Portfolio state hint --
+    parts.append(
+        "\n[Instruction] The user clicked the [Deep Analysis] button. Based on the push notification data above, "
+        "answer the user's questions in plain, easy-to-understand language. "
+        "You may:\n"
+        "- Explain the reasoning and logic behind recommendations\n"
+        "- Analyze risks and stop-loss strategies\n"
+        "- Compare with historical data\n"
+        "- Discuss alternative approaches\n"
+        "- Answer questions about market trends\n"
+        "First, briefly summarize the core content of this push notification, "
+        "then ask the user which aspects they would like to explore further. "
+        "Write all output text in Chinese."
+    )
+
+    return "\n".join(parts)
 
 
 def nl_context(

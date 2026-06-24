@@ -4,17 +4,34 @@ Reference document for the A-share analysis platform. For behavioral rules see `
 
 ## Architecture
 
+v2 is **AI-first**: an autonomous OODA agent loop, fed by three signal sources, gated
+by risk controls, with a Redis-Streams event bus for real-time reaction. (Simulation
+only — no live order routing.)
+
 ```
-┌──────────────────────────────────────────────────────────────┐
-│              Cross-cutting: OpenClaw (openclaw/)             │
-├──────────────────────────────────────────────────────────────┤
-│  Layer 1        Layer 2         Layer 3         Layer 4      │
-│  src/data/      src/analysis/   src/prediction/ src/strategy/│
-│  AKShare        Indicators      LLM Engine      + backtest/  │
-│  Config-driven  Patterns        Claude API      A-Share rules│
-├──────────────────────────────────────────────────────────────┤
-│  Web: src/web/ (FastAPI)  +  frontend/ (React + TypeScript)  │
-└──────────────────────────────────────────────────────────────┘
+  src/data/  — multi-source A-share data (AKShare · EastMoney push2 · QMT · health-routed fallback)
+       │  quotes / OHLCV / fund flow / trading calendar
+       ▼
+  ┌───────────────────────── Signal Sources ─────────────────────────┐
+  │ src/intelligence(_hub)/   src/quant/            src/recommendation/│
+  │ 5-layer sources,          HMM regime, alpha,    multi-style screener│
+  │ 7-dim scoring, causal     YAML signal library   + LLM review, T+1   │
+  │ chains, knowledge graph                          overnight risk     │
+  └────────────────────────────────┬──────────────────────────────────┘
+       │ signals
+       ▼
+  src/agent_loop/  — Autonomous OODA loop
+  SignalAggregator → DecisionPipeline (Bayesian prescreen · bull/bear debate ·
+  risk gates · Kelly sizing) · InvestmentDirector (7 teams) · sentiment-cycle gates ·
+  ThesisTracker · OutcomeTracker → ConfidenceCalibrator
+       │ TradeProposal (simulation only)
+       ▼
+  src/risk/ (circuit breaker · VaR · Kelly)   ◄──►   src/event_bus/ (Redis Streams,
+  src/trading/ (gates · kill switch · A-share          7 streams → micro-OODA on
+  constraints)                                         market/news/sentiment/signal)
+
+  Cross-cutting: src/llm/ (multi-LLM gateway + router) · src/web/ (FastAPI) ·
+  frontend/ (React SPA) · src/discord_bot/ · openclaw/ (Celery beat + always-on daemon)
 ```
 
 ## Tech Stack
@@ -23,13 +40,14 @@ See @requirements.txt for Python dependencies and @frontend/package.json for fro
 
 | Layer | Key Technologies |
 |-------|-----------------|
-| Data | AKShare, adata, XtQuant (QMT), pandas, numpy, Qlib (optional) |
-| Analysis | ta (technical indicators), plotly |
-| Prediction | Anthropic API (Claude) |
+| Data | AKShare, adata, EastMoney push2 (curl_cffi), XtQuant (QMT), pandas, numpy, pyarrow, Qlib (optional) |
+| Intelligence | NetworkX (knowledge graph), feedparser, ddgs/searxng |
+| Quant / Agent | hmmlearn (HMM regime), scikit-learn, Qlib Alpha158 (optional) |
+| Prediction / LLM | Anthropic Claude, Google Gemini, OpenAI, DeepSeek, Claude Code bridge |
 | Strategy | backtrader |
-| Web Backend | FastAPI, uvicorn, Redis |
-| Web Frontend | React 19, TypeScript, Vite, shadcn/ui, Tailwind CSS 4 |
-| Automation | OpenClaw, Celery |
+| Web Backend | FastAPI, uvicorn, Redis (cache + Streams event bus) |
+| Web Frontend | React 19, TypeScript, Vite, shadcn/ui, Tailwind CSS 4, React Query |
+| Automation | OpenClaw, Celery + Beat, always-on daemon |
 | Infra | Docker Compose, nginx |
 
 ## Config Files
@@ -102,17 +120,23 @@ Config: `ASHARE_API_URL` env var (default `http://localhost:80/api/v1`). Depende
 
 ## Data Flow
 
-System data flows follow the pattern: Config-driven → Data Collection → Layer-by-layer Processing → Intelligent Analysis → Strategy Validation.
+Two complementary flows coexist: the **agent OODA loop** (the v2 core) and the classic
+**single-stock analysis** path (still available for ad-hoc/web analysis).
 
-| Stage | Data Flow Node | Input | Output | Module |
-|:------|:---------------|:------|:-------|:-------|
-| Stage 1 | YAML Config → AKShare | Config files (stock pool, date range, frequency) | AKShare API request params | Config Loader |
-| Stage 2 | AKShare → Raw Data | API request params | Raw OHLCV, financials, fund flow CSV/Parquet files | AKShare Adapter + Data Cache |
-| Stage 3 | Raw Data → Preprocessed | Raw data files | Cleaned, adjusted, aligned standard DataFrame | Data Preprocessor |
-| Stage 4 | Preprocessed → Analysis | Standard DataFrame | Technical indicator series, candlestick pattern labels, support/resistance levels | Technical Indicators + Patterns |
-| Stage 5 | Analysis → Claude Code | Structured analysis data (Prompt template filled) | Trend judgment, confidence, risk level, signals, reasoning chain (CoT) | Prompt Engineering + Claude Engine |
-| Stage 6a | Claude Code → Reports | LLM structured output | HTML/Plotly visual analysis reports, signal lists | Report Generator |
-| Stage 6b | Claude Code → Backtest | Buy/sell signal sequences | Annualized return, Sharpe Ratio, max drawdown, win rate | A-Share Backtester |
+**Agent OODA loop** (`src/agent_loop/`, driven by `openclaw/` on the trading calendar):
+
+| Stage | Node | Output | Module |
+|:------|:-----|:-------|:-------|
+| SENSE | gather portfolio, regime, 10+ signal sources | `CycleState` | SignalAggregator |
+| ORIENT | sentiment-cycle emotion gate, decay stale theses, intel chain | gated state, invalidations | SentimentCycleDetector, ThesisTracker |
+| DECIDE | per signal: Bayesian prescreen → bull/bear debate → risk gates → Kelly sizing | `TradeProposal` (conviction/confidence) | DecisionPipeline / InvestmentDirector |
+| ACT | push to Discord, record decision log, queue for user confirmation | action queue entry (simulation) | ExecutionBridge (gated) |
+| LEARN | evaluate T+1/T+3/T+5 outcomes, recalibrate | accuracy stats, calibration update | OutcomeTracker → ConfidenceCalibrator |
+
+**Single-stock analysis** path (web / CLI):
+Config → multi-source data (`src/data/`) → technical indicators & patterns
+(`src/analysis/`) → LLM gateway prompt (`src/llm/` + `src/prediction/`) →
+structured JSON (trend, confidence, risk, signals, CoT) → reports / T+1-aware backtest.
 
 > **Data Integrity Principle**: All analysis and prediction uses only historically published data (Point-in-Time). Look-ahead bias is strictly prohibited. Every data flow record retains timestamps and source identifiers for reproducibility.
 

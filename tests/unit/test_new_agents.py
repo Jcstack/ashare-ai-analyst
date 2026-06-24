@@ -718,12 +718,12 @@ class TestPortfolioAgent:
         agent, _ = self._make()
         prompt = agent._build_prompt(_msg(symbol="000858"))
         assert "000858" in prompt
-        assert "目标股票" in prompt
+        assert "Target Stock" in prompt
 
     def test_prompt_no_symbol(self):
         agent, _ = self._make()
         prompt = agent._build_prompt(_msg(symbol=""))
-        assert "目标股票" not in prompt
+        assert "Target Stock" not in prompt
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -808,19 +808,19 @@ class TestReportAgent:
         from src.agents.report_agent import ReportAgent
 
         summary = ReportAgent._summarize_context({})
-        assert "无可用分析数据" in summary
+        assert "(No analysis data available)" in summary
 
     def test_prompt_includes_symbol(self):
         agent, _ = self._make()
         prompt = agent._build_prompt(_msg(symbol="600519"))
         assert "600519" in prompt
-        assert "分析标的" in prompt
+        assert "Analysis Target" in prompt
 
     def test_prompt_includes_rules(self):
         agent, _ = self._make()
         prompt = agent._build_prompt(_msg())
-        assert "三种情景概率之和必须 = 1.0" in prompt
-        assert "中文" in prompt
+        assert "The three scenario probabilities must sum to 1.0" in prompt
+        assert "written in Chinese" in prompt
 
     def test_no_tool_calls(self):
         agent, _ = self._make()

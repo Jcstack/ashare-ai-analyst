@@ -627,7 +627,7 @@ class TestAdataFallback:
         from src.data.fetcher import StockDataFetcher, DataCollectionError
 
         fetcher = StockDataFetcher()
-        with pytest.raises(DataCollectionError, match="adata returned empty"):
+        with pytest.raises(DataCollectionError, match="All data sources failed"):
             fetcher.fetch_daily_ohlcv(
                 symbol="000001",
                 start_date="20240102",
@@ -655,7 +655,7 @@ class TestAdataFallback:
         from src.data.fetcher import StockDataFetcher, DataCollectionError
 
         fetcher = StockDataFetcher()
-        with pytest.raises(DataCollectionError, match="adata is not installed"):
+        with pytest.raises(DataCollectionError, match="All data sources failed"):
             fetcher.fetch_daily_ohlcv(
                 symbol="000001",
                 start_date="20240102",

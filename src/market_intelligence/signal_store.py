@@ -187,6 +187,24 @@ class SignalStore:
         finally:
             conn.close()
 
+    def get_recent(
+        self,
+        hours: int = 1,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return signals from the last N hours (used by trading loop SENSE phase)."""
+        cutoff = (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM signals WHERE timestamp >= ? "
+                "ORDER BY timestamp DESC LIMIT ?",
+                (cutoff, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def get_signals(
         self,
         signal_type: str | None = None,

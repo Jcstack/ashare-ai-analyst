@@ -16,7 +16,10 @@ import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.agent_loop.models import DecisionOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +94,68 @@ class ConfidenceCalibrator:
             )
 
         return calibrated
+
+    def update_from_outcomes(self, outcomes: list[DecisionOutcome]) -> None:
+        """Ingest completed outcomes and refresh internal accuracy caches.
+
+        For each outcome with a ``direction_correct`` value, update
+        per-action and per-sector accuracy counters in the decisions DB
+        so that subsequent ``calibrate()`` calls reflect the latest data.
+
+        This is the bridge between OutcomeTracker (which evaluates T+N
+        prices) and the calibrator (which adjusts future confidence).
+        """
+        if not outcomes:
+            return
+
+        conn = self._connect()
+        if not conn:
+            logger.debug("No decisions DB — skipping outcome update")
+            return
+
+        try:
+            updated = 0
+            for outcome in outcomes:
+                if outcome.direction_correct is None:
+                    continue
+
+                # Upsert outcome data into decisions table
+                conn.execute(
+                    """
+                    UPDATE decisions
+                    SET t1_price = COALESCE(t1_price, ?),
+                        t3_price = COALESCE(t3_price, ?),
+                        t5_price = COALESCE(t5_price, ?),
+                        t1_return_pct = COALESCE(t1_return_pct, ?),
+                        t3_return_pct = COALESCE(t3_return_pct, ?),
+                        t5_return_pct = COALESCE(t5_return_pct, ?),
+                        direction_correct = COALESCE(direction_correct, ?)
+                    WHERE proposal_id = ?
+                    """,
+                    (
+                        outcome.t1_price,
+                        outcome.t3_price,
+                        outcome.t5_price,
+                        outcome.t1_return_pct,
+                        outcome.t3_return_pct,
+                        outcome.t5_return_pct,
+                        1 if outcome.direction_correct else 0,
+                        outcome.proposal_id,
+                    ),
+                )
+                updated += conn.total_changes
+
+            conn.commit()
+            if updated > 0:
+                logger.info(
+                    "Calibrator updated %d decisions from %d outcomes",
+                    updated,
+                    len(outcomes),
+                )
+        except Exception as exc:
+            logger.warning("Failed to update calibrator from outcomes: %s", exc)
+        finally:
+            conn.close()
 
     def get_calibration_report(self) -> dict[str, Any]:
         """Generate a full calibration report for dashboard display."""

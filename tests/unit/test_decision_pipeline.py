@@ -18,6 +18,7 @@ def _make_signal(
     direction: SignalDirection = SignalDirection.BUY,
     confidence: float = 0.8,
     urgency: UrgencyTier = UrgencyTier.NORMAL,
+    source_count: int | None = None,
     **kwargs,
 ) -> AggregatedSignal:
     defaults = dict(
@@ -27,29 +28,70 @@ def _make_signal(
         metadata={"entry_price": 1800.0},
     )
     defaults.update(kwargs)
-    return AggregatedSignal(
+    sig = AggregatedSignal(
         symbol=symbol,
         direction=direction,
         confidence=confidence,
         urgency=urgency,
         **defaults,
     )
+    # Default source_count=2 for buy/add so convergence gate passes;
+    # sell/reduce/hold default to 1 (convergence not required).
+    if source_count is not None:
+        sig.source_count = source_count
+    elif direction in (SignalDirection.BUY, SignalDirection.ADD):
+        sig.source_count = 2
+    return sig
+
+
+_PIPELINE_CONFIG = {
+    "min_confidence_to_propose": 0.6,
+    "min_confidence_to_recommend_buy": 0.7,
+    "max_position_pct": 0.30,
+    "max_daily_loss_pct": 0.03,
+    "consecutive_loss_threshold": 3,
+    "consecutive_loss_size_factor": 0.5,
+}
+
+
+class _FakeDebateRecord:
+    """Minimal debate record that returns a buy-approving dict."""
+
+    def __init__(self, confidence: float = 0.8):
+        self._confidence = confidence
+
+    def to_dict(self):
+        return {
+            "bull_score": self._confidence * 0.7,
+            "bear_score": (1 - self._confidence) * 0.5,
+            "reasoning": "Test debate approved",
+            "risk_veto": False,
+            "final_action": "buy",
+            "verdict": {
+                "win_probability": self._confidence,
+                "stop_loss_pct": -5.0,
+                "take_profit_pct": 10.0,
+            },
+        }
+
+
+class _FakeDebateEngine:
+    """Minimal debate engine for testing buy signal paths."""
+
+    def run_debate(self, **kwargs):
+        return _FakeDebateRecord()
 
 
 @pytest.fixture()
 def pipeline():
-    """Pipeline with no debate engine (uses fallback scoring)."""
-    return DecisionPipeline(
-        debate_engine=None,
-        config={
-            "min_confidence_to_propose": 0.6,
-            "min_confidence_to_recommend_buy": 0.7,
-            "max_position_pct": 0.30,
-            "max_daily_loss_pct": 0.03,
-            "consecutive_loss_threshold": 3,
-            "consecutive_loss_size_factor": 0.5,
-        },
-    )
+    """Pipeline with no debate engine — buy signals will be vetoed."""
+    return DecisionPipeline(debate_engine=None, config=_PIPELINE_CONFIG)
+
+
+@pytest.fixture()
+def pipeline_with_debate():
+    """Pipeline with a fake debate engine — buy signals pass through."""
+    return DecisionPipeline(debate_engine=_FakeDebateEngine(), config=_PIPELINE_CONFIG)
 
 
 class TestDailyLossCircuitBreaker:
@@ -92,9 +134,9 @@ class TestDailyLossCircuitBreaker:
 
 class TestEvaluateValidBuy:
     @pytest.mark.anyio
-    async def test_returns_trade_proposal_for_valid_buy(self, pipeline):
+    async def test_returns_trade_proposal_for_valid_buy(self, pipeline_with_debate):
         signal = _make_signal(confidence=0.85, metadata={"entry_price": 25.0})
-        result = await pipeline.evaluate(
+        result = await pipeline_with_debate.evaluate(
             signal=signal,
             portfolio=[],
             available_cash=500_000,
@@ -106,6 +148,18 @@ class TestEvaluateValidBuy:
         assert result.action == "buy"
         assert result.shares > 0
         assert result.shares % 100 == 0  # 100-lot
+
+    @pytest.mark.anyio
+    async def test_vetoes_buy_without_debate_engine(self, pipeline):
+        """Buy signals without debate engine are blocked (returns None)."""
+        signal = _make_signal(confidence=0.85, metadata={"entry_price": 25.0})
+        result = await pipeline.evaluate(
+            signal=signal,
+            portfolio=[],
+            available_cash=500_000,
+            market_data={"current_price": 25.0},
+        )
+        assert result is None
 
 
 class TestHandleCritical:
@@ -229,7 +283,7 @@ class TestEstimateOvernightRisk:
 
 class TestSectorConcentration:
     @pytest.mark.anyio
-    async def test_blocks_buy_when_sector_at_limit(self, pipeline):
+    async def test_blocks_buy_when_sector_at_limit(self, pipeline_with_debate):
         signal = _make_signal(
             confidence=0.85,
             metadata={"entry_price": 25.0, "sector": "白酒"},
@@ -242,7 +296,7 @@ class TestSectorConcentration:
                 "sector": "白酒",
             },
         ]
-        result = await pipeline.evaluate(
+        result = await pipeline_with_debate.evaluate(
             signal=signal,
             portfolio=portfolio,
             available_cash=300_000,
@@ -252,7 +306,7 @@ class TestSectorConcentration:
         assert result is None
 
     @pytest.mark.anyio
-    async def test_allows_buy_when_sector_below_limit(self, pipeline):
+    async def test_allows_buy_when_sector_below_limit(self, pipeline_with_debate):
         signal = _make_signal(
             confidence=0.85,
             metadata={"entry_price": 25.0, "sector": "白酒"},
@@ -265,7 +319,7 @@ class TestSectorConcentration:
                 "sector": "白酒",
             },
         ]
-        result = await pipeline.evaluate(
+        result = await pipeline_with_debate.evaluate(
             signal=signal,
             portfolio=portfolio,
             available_cash=490_000,
@@ -273,6 +327,131 @@ class TestSectorConcentration:
         )
         # 白酒 is 10k / 500k = 2% → well below 40% limit
         assert result is not None
+
+
+class TestBayesianPrescreen:
+    @pytest.mark.anyio
+    async def test_prescreen_blocks_low_posterior(self):
+        """Bayesian prescreen P(bull) < 0.45 → blocks buy, debate never called."""
+        mock_debate = _FakeDebateEngine()
+        # Track whether debate was called
+        debate_called = []
+        original_run = mock_debate.run_debate
+
+        def tracking_run(**kwargs):
+            debate_called.append(True)
+            return original_run(**kwargs)
+
+        mock_debate.run_debate = tracking_run
+
+        pipeline = DecisionPipeline(
+            debate_engine=mock_debate,
+            config={
+                **_PIPELINE_CONFIG,
+                "bayesian_prescreen_threshold": 0.45,
+            },
+        )
+
+        # Low-confidence buy signal → weak prior → prescreen rejects
+        signal = _make_signal(confidence=0.3, source="technical")
+        result = await pipeline.evaluate(
+            signal=signal,
+            portfolio=[],
+            available_cash=500_000,
+            market_data={"current_price": 25.0, "regime": "bear"},
+        )
+        assert result is None
+        assert len(debate_called) == 0  # debate was never called
+
+    @pytest.mark.anyio
+    async def test_prescreen_passes_strong_signal(self, pipeline_with_debate):
+        """Strong buy signal passes prescreen and reaches debate."""
+        signal = _make_signal(confidence=0.85, metadata={"entry_price": 25.0})
+        result = await pipeline_with_debate.evaluate(
+            signal=signal,
+            portfolio=[],
+            available_cash=500_000,
+            market_data={"current_price": 25.0, "regime": "bull"},
+        )
+        assert result is not None
+        assert result.action == "buy"
+
+    @pytest.mark.anyio
+    async def test_sell_skips_prescreen(self):
+        """Sell/reduce signals skip prescreen entirely."""
+        pipeline = DecisionPipeline(
+            debate_engine=None,
+            config={
+                **_PIPELINE_CONFIG,
+                "bayesian_prescreen_threshold": 0.99,  # absurdly high
+            },
+        )
+
+        signal = _make_signal(
+            direction=SignalDirection.SELL,
+            urgency=UrgencyTier.CRITICAL,
+        )
+        portfolio = [{"symbol": "600519", "shares": 200, "market_value": 360_000}]
+        result = await pipeline.evaluate(
+            signal=signal,
+            portfolio=portfolio,
+            available_cash=100_000,
+        )
+        # CRITICAL sell should still go through (prescreen not applied)
+        assert result is not None
+        assert result.action == "sell"
+
+
+class TestBudgetExhausted:
+    @pytest.mark.anyio
+    async def test_budget_exhausted_blocks_buy(self):
+        """When LLM budget is exhausted, buy debate is skipped → returns None."""
+        from unittest.mock import MagicMock
+
+        mock_budget = MagicMock()
+        mock_budget.can_call.return_value = False
+
+        pipeline = DecisionPipeline(
+            debate_engine=_FakeDebateEngine(),
+            budget_tracker=mock_budget,
+            config=_PIPELINE_CONFIG,
+        )
+
+        signal = _make_signal(confidence=0.85, metadata={"entry_price": 25.0})
+        result = await pipeline.evaluate(
+            signal=signal,
+            portfolio=[],
+            available_cash=500_000,
+            market_data={"current_price": 25.0},
+        )
+        assert result is None
+
+    @pytest.mark.anyio
+    async def test_budget_exhausted_allows_sell(self):
+        """Sell signals pass through even when budget is exhausted."""
+        from unittest.mock import MagicMock
+
+        mock_budget = MagicMock()
+        mock_budget.can_call.return_value = False
+
+        pipeline = DecisionPipeline(
+            debate_engine=None,
+            budget_tracker=mock_budget,
+            config=_PIPELINE_CONFIG,
+        )
+
+        signal = _make_signal(
+            direction=SignalDirection.SELL,
+            urgency=UrgencyTier.CRITICAL,
+        )
+        portfolio = [{"symbol": "600519", "shares": 200, "market_value": 360_000}]
+        result = await pipeline.evaluate(
+            signal=signal,
+            portfolio=portfolio,
+            available_cash=100_000,
+        )
+        assert result is not None
+        assert result.action == "sell"
 
 
 class TestConfidenceGate:

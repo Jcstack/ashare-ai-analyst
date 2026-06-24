@@ -1,11 +1,14 @@
 """Chat API endpoints for the v12.0 Agent architecture.
 
 Provides thread-based conversational interface to the Master Agent.
+PRD v50 aligned: POST /threads returns immediately, processes in background.
+Frontend polls GET /threads/:id for completion.
 """
 
+import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from src.llm.base import LLMProviderError
 from src.web.dependencies import get_agent_service, get_suggestion_service
@@ -24,25 +27,26 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
 
+# Track background tasks to prevent GC
+_background_tasks: set[asyncio.Task] = set()
+
 
 @router.post("/threads", response_model=CreateThreadResponse)
 async def create_thread(
     body: CreateThreadRequest,
     agent: AgentService = Depends(get_agent_service),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
-    """Create a new chat thread and send the first message."""
+    """Create a new chat thread and start processing in background.
+
+    Returns immediately with thread_id and processing_status='processing'.
+    Frontend should poll GET /threads/:id until processing_status='ready'.
+    """
     try:
-        thread_id, reply = await agent.create_thread(
+        thread_id = agent.create_thread_background(
             message=body.message,
             context=body.context,
-            use_multi_agent=body.use_multi_agent,
             persona=body.persona,
-        )
-    except LLMProviderError as exc:
-        logger.error("LLM provider unavailable: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail="AI 服务暂时不可用，请检查 LLM 配置后重试。",
         )
     except Exception as exc:
         logger.exception("Failed to create thread: %s", exc)
@@ -51,15 +55,71 @@ async def create_thread(
             detail="创建对话失败，请稍后重试。",
         )
 
-    # Re-read thread to get title
-    thread = agent.get_thread(thread_id)
-    title = thread.title if thread else body.message[:50]
+    # Save user message immediately so it appears in polls
+    from src.web.schemas.chat import ChatMessage
+    import uuid
+    from datetime import datetime, timezone
+
+    user_msg = ChatMessage(
+        id=str(uuid.uuid4()),
+        role="user",
+        content=body.message,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+    agent._save_message(thread_id, user_msg)
+
+    # Use threading for background processing (asyncio.create_task gets
+    # lost in Gunicorn + UvicornWorker due to event loop lifecycle)
+    import threading
+
+    def _run_background():
+        import asyncio as _aio
+
+        try:
+            _aio.run(
+                _process_thread_safe(
+                    agent, thread_id, body.message, body.use_multi_agent
+                )
+            )
+        except Exception as exc:
+            logger.exception("Background thread crashed for %s: %s", thread_id[:8], exc)
+            agent._set_thread_status(thread_id, "error")
+
+    t = threading.Thread(target=_run_background, daemon=True)
+    t.start()
+    logger.info("Background thread started for %s", thread_id[:8])
+
+    title = body.message[:50].strip()
+    if len(body.message) > 50:
+        title += "..."
 
     return CreateThreadResponse(
         thread_id=thread_id,
         title=title,
-        reply=reply,
+        reply=None,
+        processing_status="processing",
     )
+
+
+async def _process_thread_safe(
+    agent: AgentService,
+    thread_id: str,
+    message: str,
+    use_multi_agent: bool,
+) -> None:
+    """Background wrapper with error handling."""
+    try:
+        await agent.process_thread_background(
+            thread_id, message, use_multi_agent=use_multi_agent
+        )
+    except LLMProviderError as exc:
+        logger.error("Background LLM error for thread %s: %s", thread_id[:8], exc)
+        agent._set_thread_status(thread_id, "error")
+    except Exception as exc:
+        logger.exception(
+            "Background processing failed for thread %s: %s", thread_id[:8], exc
+        )
+        agent._set_thread_status(thread_id, "error")
 
 
 @router.post("/threads/{thread_id}/messages")

@@ -58,10 +58,18 @@ def _build_beat_schedule(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
             month_of_year=str(cron_cfg.get("month_of_year", "*")),
         )
 
-        beat_schedule[name] = {
+        beat_entry: dict[str, Any] = {
             "task": task_path,
             "schedule": schedule,
         }
+
+        # Optional: pass positional or keyword arguments to the task
+        if "args" in entry:
+            beat_entry["args"] = tuple(entry["args"])
+        if "kwargs" in entry:
+            beat_entry["kwargs"] = dict(entry["kwargs"])
+
+        beat_schedule[name] = beat_entry
 
         logger.debug("Registered beat schedule '%s' -> %s", name, task_path)
 
@@ -109,6 +117,12 @@ def create_celery_app() -> Celery:
         accept_content=["json"],
         task_track_started=True,
         worker_hijack_root_logger=False,
+        # Memory management: recycle worker after 512MB to prevent OOM.
+        worker_max_memory_per_child=512_000,  # 512MB in KB
+        # Reduce prefetch to 1 so workers don't queue memory-heavy tasks
+        worker_prefetch_multiplier=1,
+        # Default concurrency (overridable via CLI --concurrency)
+        worker_concurrency=2,
     )
 
     # Beat schedule from config

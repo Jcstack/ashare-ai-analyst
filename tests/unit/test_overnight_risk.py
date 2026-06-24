@@ -1,5 +1,7 @@
 """Tests for overnight risk calculator (I-090 Phase 2)."""
 
+from unittest.mock import Mock
+
 import pandas as pd
 
 from src.recommendation.overnight_risk import (
@@ -112,7 +114,10 @@ class TestOvernightRiskCalculator:
         assert "000001" in ctx
 
     def test_batch_calculation(self):
-        calc = OvernightRiskCalculator()
         # Mock fetcher to return empty — should return empty dict gracefully
+        fetcher = Mock()
+        fetcher.fetch_daily_ohlcv.return_value = None
+        calc = OvernightRiskCalculator(fetcher=fetcher)
         result = calc.calculate_batch(["000001", "000002"])
         assert isinstance(result, dict)
+        assert result == {}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 from src.data.eastmoney_client import (
     EastMoneyClient,
@@ -176,7 +177,11 @@ class TestEastMoneyClient:
         # Second call: proxied data request
         data_call = mock_session.get.call_args_list[1]
         data_url = data_call[0][0]
-        assert "push2.eastmoney.com" in data_url  # original URL, not rewritten
+        # original URL host (e.g. "82.push2.eastmoney.com"), not rewritten to the gateway
+        data_host = urlparse(data_url).hostname or ""
+        assert data_host == "push2.eastmoney.com" or data_host.endswith(
+            ".push2.eastmoney.com"
+        )
         data_kwargs = data_call[1]
         assert data_kwargs["headers"]["User-Agent"] == "Mozilla/5.0 Test"
         assert "cookie_val" in data_kwargs["headers"]["Cookie"]

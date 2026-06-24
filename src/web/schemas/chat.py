@@ -67,6 +67,7 @@ class ChatThread(BaseModel):
     persona: str | None = None
     created_at: str
     updated_at: str
+    processing_status: str = "ready"  # "processing" | "ready" | "error"
 
 
 # ---------------------------------------------------------------------------
@@ -140,11 +141,16 @@ class CreateThreadRequest(BaseModel):
 
 
 class CreateThreadResponse(BaseModel):
-    """Response after creating a thread and getting the first reply."""
+    """Response after creating a thread.
+
+    When processing_status is 'processing', reply is None and the frontend
+    should poll GET /threads/:id until status changes to 'ready'.
+    """
 
     thread_id: str
     title: str
-    reply: ChatMessage
+    reply: ChatMessage | None = None
+    processing_status: str = "ready"  # "processing" | "ready" | "error"
 
 
 class MessageFeedbackRequest(BaseModel):

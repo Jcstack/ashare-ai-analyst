@@ -171,7 +171,7 @@ def task_prewarm_sentiment_report(self) -> dict[str, Any]:
             from src.data.trend_news import TrendNewsAggregator
 
             agg = TrendNewsAggregator()
-            trend_items = agg.fetch_trending()
+            trend_items = agg.fetch_all()
         except Exception as exc:
             logger.warning("Prewarm: trend news fetch failed: %s", exc)
 

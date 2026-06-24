@@ -28,6 +28,10 @@ _GOOGLE_COSTS_FALLBACK: dict[str, dict[str, float]] = {
     "gemini-2.5-pro": {"input": 0.00125, "output": 0.01},
     "gemini-2.5-flash": {"input": 0.00015, "output": 0.0006},
     "gemini-2.0-flash": {"input": 0.0001, "output": 0.0004},
+    "gemini-2.0-flash-lite": {"input": 0.000075, "output": 0.0003},
+    "gemini-3.1-pro": {"input": 0.0, "output": 0.0},
+    "gemini-3-flash": {"input": 0.0, "output": 0.0},
+    "gemini-3.1-flash-lite": {"input": 0.0, "output": 0.0},
 }
 
 # Load pricing from config/llm.yaml, merge with fallback
@@ -52,6 +56,7 @@ class GoogleProvider(BaseLLMProvider):
         max_retries: Maximum retry attempts for transient failures.
         request_timeout: Request timeout in seconds.
         fallback_model: Optional fallback model on primary failure.
+        fallback_models: Optional ordered list of fallback models (overrides fallback_model).
     """
 
     def __init__(
@@ -61,21 +66,27 @@ class GoogleProvider(BaseLLMProvider):
         max_retries: int = 2,
         request_timeout: float = 60.0,
         fallback_model: str | None = None,
+        fallback_models: list[str] | None = None,
     ) -> None:
         self._api_key = api_key
         self._default_model = default_model
         self._max_retries = max_retries
         self._request_timeout = request_timeout
-        self._fallback_model = fallback_model
+        # Support ordered fallback chain: [model_1, model_2, ...]
+        if fallback_models:
+            self._fallback_chain = fallback_models
+        elif fallback_model:
+            self._fallback_chain = [fallback_model]
+        else:
+            self._fallback_chain = []
+        self._fallback_model = fallback_model  # keep for compat
         self._client = genai.Client(
             api_key=api_key,
             http_options=types.HttpOptions(timeout=int(request_timeout * 1000)),
         )
 
-        masked = api_key[:8] + "***" if len(api_key) > 8 else "***"
         logger.info(
-            "GoogleProvider initialized (key: %s, model: %s, fallback: %s)",
-            masked,
+            "GoogleProvider initialized (model: %s, fallback: %s)",
             default_model,
             fallback_model or "none",
         )
@@ -117,6 +128,12 @@ class GoogleProvider(BaseLLMProvider):
         """
         model = model or self._default_model
         grounding = kwargs.get("grounding", False)
+
+        # Gemini 2.5 thinking models consume output tokens for reasoning.
+        # With small max_tokens, all budget goes to thinking → empty output.
+        # Floor at 8192 to leave enough room after thinking tokens.
+        if "2.5" in model and max_tokens < 8192:
+            max_tokens = 8192
 
         # Separate system instruction from conversation
         system_instruction = None
@@ -221,18 +238,25 @@ class GoogleProvider(BaseLLMProvider):
 
         try:
             return self._call_with_retry(_do_call, max_attempts=self._max_retries)
-        except Exception:
-            if self._fallback_model and self._fallback_model != model:
+        except Exception as primary_exc:
+            # Try each fallback model in order
+            for fb_model in self._fallback_chain:
+                if fb_model == model:
+                    continue
                 logger.warning(
                     "Primary model %s failed, falling back to %s",
                     model,
-                    self._fallback_model,
+                    fb_model,
                 )
-                return self._call_with_retry(
-                    lambda: _do_call(self._fallback_model),
-                    max_attempts=self._max_retries,
-                )
-            raise
+                try:
+                    return self._call_with_retry(
+                        lambda m=fb_model: _do_call(m),
+                        max_attempts=self._max_retries,
+                    )
+                except Exception:
+                    logger.warning("Fallback model %s also failed", fb_model)
+                    continue
+            raise primary_exc
 
     def complete_with_tools(
         self,
@@ -361,18 +385,24 @@ class GoogleProvider(BaseLLMProvider):
 
         try:
             return self._call_with_retry(_do_call, max_attempts=self._max_retries)
-        except Exception:
-            if self._fallback_model and self._fallback_model != model:
+        except Exception as primary_exc:
+            for fb_model in self._fallback_chain:
+                if fb_model == model:
+                    continue
                 logger.warning(
                     "Primary model %s failed (tools), falling back to %s",
                     model,
-                    self._fallback_model,
+                    fb_model,
                 )
-                return self._call_with_retry(
-                    lambda: _do_call(self._fallback_model),
-                    max_attempts=self._max_retries,
-                )
-            raise
+                try:
+                    return self._call_with_retry(
+                        lambda m=fb_model: _do_call(m),
+                        max_attempts=self._max_retries,
+                    )
+                except Exception:
+                    logger.warning("Fallback model %s also failed (tools)", fb_model)
+                    continue
+            raise primary_exc
 
     def check_balance(self) -> dict[str, Any]:
         """Check Google AI API key status.

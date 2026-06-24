@@ -52,16 +52,14 @@ stress_test:
         建材: 1.5
 
 position_sizing:
-  # Maximum single-position weight (30% cap per A-share best practice)
-  max_single_weight: 0.30
-  # Minimum position size in shares (A-share lot = 100)
-  min_lot_size: 100
-  # Kelly fraction scaling (conservative multiplier, typically 0.25-0.5)
-  kelly_fraction: 0.25
-  # Target annual volatility for vol-scaling
-  target_volatility: 0.15
-  # Maximum total leverage (1.0 = no leverage)
-  max_leverage: 1.0
+  # Conviction-based sizing (Druckenmiller: "put all eggs in one basket")
+  # No hard cap per stock — Agent decides based on confidence + market regime
+  # "The greatest investors make large concentrated bets where they have conviction"
+  max_single_weight: 1.0     # Allow 100% on single stock if confidence warrants
+  min_lot_size: 100           # A-share lot = 100
+  kelly_fraction: 0.5         # Half-Kelly (aggressive but not full Kelly)
+  target_volatility: 0.20     # Higher tolerance for concentrated portfolios
+  max_leverage: 1.0           # No margin
 
 circuit_breaker:
   # Daily portfolio loss threshold to trigger halt

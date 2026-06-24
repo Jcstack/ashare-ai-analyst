@@ -106,7 +106,7 @@ class TestOpenAIProvider:
         from src.llm.openai import OpenAIProvider
 
         provider = OpenAIProvider(api_key="sk-openai12345678")
-        assert provider.default_model == "gpt-4o"
+        assert provider.default_model == "gpt-5.4-mini"
 
     def test_check_balance(self, mock_openai_sdk):
         from src.llm.openai import OpenAIProvider
@@ -132,7 +132,7 @@ class TestOpenAIProvider:
         messages = [LLMMessage(role="user", content="Test")]
         result = provider.complete(messages)
 
-        expected_cost = 150 * 0.0025 / 1000 + 300 * 0.01 / 1000
+        expected_cost = 150 * 0.00075 / 1000 + 300 * 0.0045 / 1000
         assert abs(result.cost_usd - expected_cost) < 0.0001
 
     def test_empty_content_handled(self, mock_openai_sdk):

@@ -7,13 +7,16 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from src.intelligence_hub.models import InfoItem
 from src.intelligence_hub.source_base import InformationSource
 
 logger = logging.getLogger(__name__)
+
+_CST = ZoneInfo("Asia/Shanghai")
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _URL_DATE_RE = re.compile(r"/(\d{4}-\d{2}-\d{2})/")
@@ -39,9 +42,9 @@ class AkshareNewsSource(InformationSource):
         if not match:
             return ""
         url_date = match.group(1)
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        today = datetime.now(_CST).strftime("%Y-%m-%d")
         if url_date == today:
-            return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+            return datetime.now(_CST).strftime("%Y-%m-%d %H:%M:%S")
         return f"{url_date} 12:00:00"
 
     def fetch(self) -> list[InfoItem]:

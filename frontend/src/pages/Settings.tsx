@@ -11,7 +11,7 @@ import { InvestmentStyleSettingsTab } from "@/components/settings/InvestmentStyl
 const TABS = [
   { value: "appearance", label: "外观" },
   { value: "trading", label: "投资" },
-  { value: "investment-style", label: "选股偏好" },
+  { value: "style", label: "选股偏好" },
   { value: "follows", label: "关注配置" },
   { value: "intelligence", label: "情报偏好" },
   { value: "notifications", label: "通知与推送" },
@@ -53,7 +53,7 @@ export default function Settings() {
           <TradingSettingsTab />
         </TabsContent>
 
-        <TabsContent value="investment-style" className="mt-6">
+        <TabsContent value="style" className="mt-6">
           <InvestmentStyleSettingsTab />
         </TabsContent>
 

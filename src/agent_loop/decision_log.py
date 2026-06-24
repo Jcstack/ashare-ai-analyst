@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 _VALID_HORIZONS = {"t1", "t3", "t5"}
 
+# A-share transaction cost constants
+COMMISSION_RATE = 0.0003  # 0.03% each way (broker commission)
+STAMP_TAX_RATE = 0.001  # 0.1% sell only (government stamp tax)
+SLIPPAGE_RATE = 0.0005  # 0.05% estimated slippage each way
+ROUND_TRIP_COST = COMMISSION_RATE * 2 + STAMP_TAX_RATE + SLIPPAGE_RATE * 2  # ~0.21%
+
 
 class DecisionLog:
     """CRUD operations for the ``decisions`` table in ``data/decisions.db``."""
@@ -31,7 +37,14 @@ class DecisionLog:
     # Mutations
     # ------------------------------------------------------------------
 
-    def record(self, proposal_id: str, symbol: str, action: str, price: float) -> str:
+    def record(
+        self,
+        proposal_id: str,
+        symbol: str,
+        action: str,
+        price: float,
+        sector: str = "",
+    ) -> str:
         """Record a new decision. Returns the generated decision_id."""
         decision_id = str(uuid.uuid4())
         now = datetime.now(UTC).isoformat()
@@ -42,10 +55,10 @@ class DecisionLog:
                 """
                 INSERT INTO decisions (
                     decision_id, proposal_id, symbol, action,
-                    decided_at, decided_price
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    decided_at, decided_price, sector
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (decision_id, proposal_id, symbol, action, now, price),
+                (decision_id, proposal_id, symbol, action, now, price, sector),
             )
             conn.commit()
             logger.info(
@@ -90,7 +103,13 @@ class DecisionLog:
             decided_price: float = row["decided_price"]
             action: str = row["action"]
 
-            return_pct = ((price - decided_price) / decided_price) * 100.0
+            gross_return = (price - decided_price) / decided_price
+            # Apply transaction costs for buy/add (implies future round-trip sell)
+            if action.lower() in ("buy", "add"):
+                net_return = gross_return - ROUND_TRIP_COST
+            else:
+                net_return = gross_return
+            return_pct = net_return * 100.0
             direction_correct = self._check_direction(action, return_pct)
 
             conn.execute(
@@ -224,6 +243,109 @@ class DecisionLog:
         finally:
             conn.close()
 
+    def get_sector_stats(
+        self, sector: str, lookback_days: int = 60
+    ) -> dict[str, float] | None:
+        """Compute win rate statistics for a given sector.
+
+        Args:
+            sector: Sector name to filter by.
+            lookback_days: How far back to look.
+
+        Returns:
+            Dictionary with ``win_rate`` and ``sample_count``, or None if
+            the sector column has no data.
+        """
+        cutoff = (datetime.now(UTC) - timedelta(days=lookback_days)).isoformat()
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN direction_correct = 1 THEN 1 ELSE 0 END)
+                        AS correct,
+                    SUM(CASE WHEN direction_correct IS NOT NULL THEN 1 ELSE 0 END)
+                        AS evaluated
+                FROM decisions
+                WHERE sector = ? AND decided_at >= ?
+                """,
+                (sector, cutoff),
+            ).fetchone()
+
+            evaluated = row["evaluated"] or 0
+            if evaluated == 0:
+                return None
+
+            return {
+                "win_rate": (row["correct"] or 0) / evaluated,
+                "sample_count": evaluated,
+            }
+        except Exception as exc:
+            logger.warning("Failed to get sector stats for %s: %s", sector, exc)
+            return None
+        finally:
+            conn.close()
+
+    def get_historical_stats(
+        self, action: str, lookback_days: int = 90
+    ) -> dict[str, float]:
+        """Compute win/loss statistics from completed outcomes for Kelly sizing.
+
+        Args:
+            action: Trade action to filter by (e.g. ``'buy'``, ``'sell'``).
+            lookback_days: How far back to look for completed decisions.
+
+        Returns:
+            Dictionary with keys: ``win_rate``, ``avg_win``, ``avg_loss``,
+            ``sample_count``.  If sample_count < 20, returns conservative
+            defaults to avoid overfitting on sparse data.
+        """
+        conservative_defaults = {
+            "win_rate": 0.45,
+            "avg_win": 0.03,
+            "avg_loss": 0.03,
+            "sample_count": 0,
+        }
+
+        cutoff = (datetime.now(UTC) - timedelta(days=lookback_days)).isoformat()
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT t1_return_pct
+                FROM decisions
+                WHERE action IN (?, ?)
+                  AND t1_return_pct IS NOT NULL
+                  AND decided_at >= ?
+                """,
+                (action.lower(), action.capitalize(), cutoff),
+            ).fetchall()
+
+            if len(rows) < 20:
+                conservative_defaults["sample_count"] = len(rows)
+                return conservative_defaults
+
+            returns = [r["t1_return_pct"] / 100.0 for r in rows]  # convert to decimal
+            wins = [r for r in returns if r > 0]
+            losses = [r for r in returns if r <= 0]
+
+            win_rate = len(wins) / len(returns) if returns else 0.45
+            avg_win = sum(wins) / len(wins) if wins else 0.03
+            avg_loss = abs(sum(losses) / len(losses)) if losses else 0.03
+
+            return {
+                "win_rate": round(win_rate, 4),
+                "avg_win": round(avg_win, 4),
+                "avg_loss": round(avg_loss, 4),
+                "sample_count": len(returns),
+            }
+        except Exception as exc:
+            logger.warning("Failed to compute historical stats: %s", exc)
+            return conservative_defaults
+        finally:
+            conn.close()
+
     def get_recent(self, limit: int = 20) -> list[DecisionOutcome]:
         """Get the most recent decisions, ordered newest-first."""
         conn = self._connect()
@@ -257,6 +379,11 @@ class DecisionLog:
     @staticmethod
     def _row_to_outcome(row: sqlite3.Row) -> DecisionOutcome:
         """Convert a DB row to :class:`DecisionOutcome`."""
+        # sector column may not exist in older DBs before migration runs
+        try:
+            sector = row["sector"] or ""
+        except (IndexError, KeyError):
+            sector = ""
         return DecisionOutcome(
             decision_id=row["decision_id"],
             proposal_id=row["proposal_id"],
@@ -273,6 +400,7 @@ class DecisionLog:
             direction_correct=bool(row["direction_correct"])
             if row["direction_correct"] is not None
             else None,
+            sector=sector,
         )
 
     def _connect(self) -> sqlite3.Connection:
@@ -318,6 +446,20 @@ class DecisionLog:
                 "CREATE INDEX IF NOT EXISTS idx_decisions_proposal "
                 "ON decisions(proposal_id)"
             )
+            # v-next migration: add sector column for sector-level calibration
+            self._migrate_sector_column(conn)
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _migrate_sector_column(conn: sqlite3.Connection) -> None:
+        """Add ``sector`` column if missing."""
+        cursor = conn.execute("PRAGMA table_info(decisions)")
+        existing = {row[1] for row in cursor.fetchall()}
+        if "sector" not in existing:
+            conn.execute("ALTER TABLE decisions ADD COLUMN sector TEXT DEFAULT ''")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decisions_sector ON decisions(sector)"
+            )
+            logger.info("Migrated: added sector column to decisions")

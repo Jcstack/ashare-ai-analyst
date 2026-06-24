@@ -189,7 +189,13 @@ class SentinelCapture:
             from src.llm.base import LLMMessage
 
             messages = [
-                LLMMessage(role="system", content="你是A股市场情绪分析师。"),
+                LLMMessage(
+                    role="system",
+                    content=(
+                        "You are an A-share market sentiment analyst. "
+                        "Write all output text in Chinese."
+                    ),
+                ),
                 LLMMessage(role="user", content=prompt),
             ]
             timeout = self._config.get("timeout_seconds", 30)
@@ -213,7 +219,10 @@ class SentinelCapture:
     ) -> str:
         """Build sentiment analysis prompt from raw data."""
         parts: list[str] = []
-        parts.append("请分析以下A股市场数据，为每只股票输出情绪分数(0-1)和简短评价。")
+        parts.append(
+            "Analyze the following A-share market data. For each stock, output a "
+            "sentiment score (0-1) and a short assessment. Write all text values in Chinese."
+        )
         parts.append("")
 
         # News summary per symbol
@@ -241,7 +250,7 @@ class SentinelCapture:
             )
             parts.append(f"\n热度排行: {hot_text}")
 
-        parts.append("\n请以JSON格式回复:")
+        parts.append("\nRespond in JSON format (all text values in Chinese):")
         parts.append(
             '{"sentiment": {"SYMBOL": {"score": 0.X, "label": "..."}}, '
             '"summary": "一句话总结"}'

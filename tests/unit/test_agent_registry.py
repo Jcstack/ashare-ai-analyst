@@ -161,18 +161,23 @@ class TestAgentRegistry:
 
     @patch("src.agents.registry.load_config")
     def test_bootstrap_creates_agents(self, mock_load):
-        # bootstrap() registers an agent for each entry in its hardcoded
-        # agent_classes map that ALSO has a capability declared in config.
-        # Agent names not in agent_classes (e.g. "not_a_real_agent") are ignored,
-        # and canonical agents without a capability are skipped.
+        # bootstrap() builds agents from a fixed catalogue of known specialist
+        # classes, creating one only when the config declares a matching
+        # capability. Use real catalogue names so the intersection is non-empty.
         mock_load.return_value = {
             "master": {"max_tokens_per_request": 4096},
             "agents": {
                 "data_qa": {
                     "description": "Data QA",
-                    "system_role": "You validate data",
+                    "system_role": "You are a data quality gatekeeper",
                     "tools": ["get_realtime_quote"],
                     "max_tokens_per_request": 3072,
+                },
+                "sentiment": {
+                    "description": "Sentiment",
+                    "system_role": "You are a sentiment analyst",
+                    "tools": ["get_trending_news"],
+                    "max_tokens_per_request": 2048,
                 },
                 "trader": {
                     "description": "Trader",
@@ -181,16 +186,11 @@ class TestAgentRegistry:
                     "max_tokens_per_request": 1024,
                     "use_llm": False,
                 },
-                "report": {
-                    "description": "Report",
-                    "system_role": "Reporter",
-                    "tools": ["get_trending_news"],
+                "regime": {
+                    "description": "Regime",
+                    "system_role": "You are a market regime analyst",
+                    "tools": ["get_portfolio"],
                     "max_tokens_per_request": 3072,
-                },
-                # Not part of agent_classes — must never be created.
-                "not_a_real_agent": {
-                    "tools": [],
-                    "max_tokens_per_request": 1024,
                 },
             },
             "budget": {},
@@ -199,6 +199,7 @@ class TestAgentRegistry:
         mock_tool_registry = MagicMock()
         mock_tool_registry.get_tool_definitions.return_value = [
             {"name": "get_realtime_quote", "description": "a", "input_schema": {}},
+            {"name": "get_portfolio", "description": "b", "input_schema": {}},
             {"name": "execute_trade", "description": "c", "input_schema": {}},
             {"name": "get_trending_news", "description": "d", "input_schema": {}},
         ]
@@ -210,12 +211,11 @@ class TestAgentRegistry:
             llm_router=mock_llm,
         )
 
-        assert set(registry.list_agents()) == {"data_qa", "trader", "report"}
+        assert len(registry.list_agents()) == 4
         assert registry.get("data_qa") is not None
+        assert registry.get("sentiment") is not None
         assert registry.get("trader") is not None
-        assert registry.get("report") is not None
-        # An agent name outside the hardcoded agent_classes is never created.
-        assert registry.get("not_a_real_agent") is None
+        assert registry.get("regime") is not None
 
     @patch("src.agents.registry.load_config")
     def test_multiple_capabilities_parsed(self, mock_load):

@@ -19,20 +19,8 @@ interface InfoFeedProps {
 }
 
 export function InfoFeed({ categoryOverride }: InfoFeedProps) {
-  const { activeCategory, searchQuery, priorityFilter, bookmarkedOnly, sortBy, newItemIds } = useInfoHubStore()
+  const { activeCategory, searchQuery, priorityFilter, bookmarkedOnly, relevanceOnly, sortBy, newItemIds } = useInfoHubStore()
   const category = categoryOverride ?? activeCategory
-
-  const { data, isLoading } = useInfoFeed({
-    category,
-    priority: priorityFilter,
-    search: searchQuery || undefined,
-    bookmarked: bookmarkedOnly || undefined,
-    sort_by: sortBy,
-    limit: 50,
-  })
-
-  const bookmarkMutation = useToggleBookmark()
-  const readMutation = useMarkRead()
 
   // Build a set of tracked symbols (watchlist + portfolio) for relevance matching
   const { data: watchlist } = useWatchlist()
@@ -43,6 +31,25 @@ export function InfoFeed({ categoryOverride }: InfoFeedProps) {
     for (const p of positions) map.set(p.symbol, p.name)
     return map
   }, [watchlist, positions])
+
+  // When "与我相关" is active, pass tracked symbols as comma-separated filter
+  const symbolFilter = useMemo(() => {
+    if (!relevanceOnly || trackedSymbols.size === 0) return undefined
+    return Array.from(trackedSymbols.keys()).join(",")
+  }, [relevanceOnly, trackedSymbols])
+
+  const { data, isLoading } = useInfoFeed({
+    category,
+    priority: priorityFilter,
+    search: searchQuery || undefined,
+    bookmarked: bookmarkedOnly || undefined,
+    symbol: symbolFilter,
+    sort_by: sortBy,
+    limit: 50,
+  })
+
+  const bookmarkMutation = useToggleBookmark()
+  const readMutation = useMarkRead()
 
   // Accordion: only one card expanded at a time
   const [expandedId, setExpandedId] = useState<string | null>(null)

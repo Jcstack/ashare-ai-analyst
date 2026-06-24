@@ -26,6 +26,47 @@ def _should_execute(task_name: str) -> bool:
         return True
 
 
+def _publish_to_event_bus(stream: str, events: list[dict]) -> int:
+    """Publish events to the EventBus (fire-and-forget).
+
+    Lazily initializes the EventBus singleton. Never raises — publishing
+    failure must not break the intelligence pipeline.
+
+    Returns:
+        Number of events successfully published.
+    """
+    if not events:
+        return 0
+    try:
+        import asyncio
+
+        from src.intelligence.event_bus import get_event_bus
+
+        bus = get_event_bus()
+
+        async def _do_publish() -> int:
+            count = 0
+            for evt in events:
+                result = await bus.publish(stream, evt)
+                if result is not None:
+                    count += 1
+            return count
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(asyncio.run, _do_publish()).result(timeout=5)
+            return loop.run_until_complete(_do_publish())
+        except RuntimeError:
+            return asyncio.run(_do_publish())
+    except Exception as exc:
+        logger.warning("Event bus publish failed (non-critical): %s", exc)
+        return 0
+
+
 @app.task(
     bind=True,
     max_retries=1,
@@ -50,27 +91,41 @@ def black_swan_scan(self: Any) -> dict[str, Any]:
 
     try:
         from src.data.global_market import GlobalMarketFetcher
-        from src.intelligence.black_swan_detector import (
-            BlackSwanDetector,
-            build_scan_input_from_snapshot,
-        )
+        from src.intelligence.black_swan_detector import BlackSwanDetector
 
         fetcher = GlobalMarketFetcher()
-        snapshot = fetcher.fetch_all()
+        snapshot = fetcher.fetch_global_snapshot()
 
-        scan_input = build_scan_input_from_snapshot(snapshot)
         detector = BlackSwanDetector()
-        alert = detector.scan(scan_input)
+        scan_input = detector.build_scan_input_from_snapshot(snapshot)
+        alerts = detector.scan(scan_input)
 
-        if alert is None:
+        if not alerts:
             logger.debug("black_swan_scan: no anomalies")
             return {"alert_level": "NONE", "indicators": []}
 
+        # Return the highest-severity alert
+        alert = alerts[0]
         logger.warning(
             "black_swan_scan: alert_level=%s, breached=%d",
-            alert.alert_level,
-            len(alert.breached_indicators),
+            alert.level,
+            len(alert.triggered_indicators),
         )
+
+        # Publish to event bus for trading loop consumption
+        _publish_to_event_bus(
+            "sentinel:raw_intel",
+            [
+                {
+                    "event_type": "NEWS_EVENT",
+                    "sub_type": "black_swan",
+                    "alert_level": str(alert.level),
+                    "breached_count": len(alert.triggered_indicators),
+                    "source": "black_swan_scan",
+                }
+            ],
+        )
+
         return alert.to_dict()
 
     except Exception as exc:
@@ -127,6 +182,21 @@ def portfolio_macro_scan(self: Any) -> dict[str, Any]:
             logger.warning(
                 "portfolio_macro_scan: %d positions under macro stress",
                 len(stressed),
+            )
+            # Publish macro stress events for trading loop consumption
+            _publish_to_event_bus(
+                "analyst:event_understood",
+                [
+                    {
+                        "event_type": "POLICY_EVENT",
+                        "sub_type": "macro_stress",
+                        "symbol": p.symbol,
+                        "rotation_signal": p.rotation_signal,
+                        "macro_score": getattr(p, "macro_score", 0),
+                        "source": "portfolio_macro_scan",
+                    }
+                    for p in stressed
+                ],
             )
 
         return {
@@ -294,10 +364,7 @@ def portfolio_snapshot(self: Any) -> dict[str, Any]:
             p.get("current_value", p.get("cost_price", 0) * p.get("shares", 0))
             for p in positions
         )
-        total_cost = sum(
-            p.get("cost_price", 0) * p.get("shares", 0)
-            for p in positions
-        )
+        total_cost = sum(p.get("cost_price", 0) * p.get("shares", 0) for p in positions)
         unrealized_pnl = total_value - total_cost
 
         # Store in SQLite

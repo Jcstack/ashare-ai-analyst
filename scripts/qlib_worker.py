@@ -192,15 +192,55 @@ def _get_alpha_factors_for(qlib_code: str) -> dict[str, float] | None:
     """Compute alpha factors for a single Qlib code."""
     from qlib.data import D
 
-    # Query last 60 days of available data (need lookback for 20d indicators)
-    start_time = _get_query_start(60)
+    # Query last 120 days of available data (need lookback for 60d indicators)
+    start_time = _get_query_start(120)
 
     factor_exprs = [
+        # Momentum (5 factors)
         ("momentum_5d", "$close/Ref($close, 5) - 1"),
+        ("momentum_10d", "$close/Ref($close, 10) - 1"),
         ("momentum_20d", "$close/Ref($close, 20) - 1"),
-        ("volatility_20d", "Std($close, 20)/Mean($close, 20)"),
-        ("turnover_ratio", "$volume/Ref($volume, 5)"),
-        ("price_to_ma20", "$close/Mean($close, 20) - 1"),
+        ("momentum_60d", "$close/Ref($close, 60) - 1"),
+        ("roc_10d", "($close - Ref($close, 10)) / Ref($close, 10)"),
+        # Reversal (3 factors)
+        ("mean_reversion_5d", "Mean($close, 5) / $close - 1"),
+        ("mean_reversion_20d", "Mean($close, 20) / $close - 1"),
+        ("high_low_ratio_20d", "($high - $low) / Mean($close, 20)"),
+        # Volatility (3 factors)
+        ("volatility_5d", "Std($close, 5) / Mean($close, 5)"),
+        ("volatility_20d", "Std($close, 20) / Mean($close, 20)"),
+        (
+            "atr_14d",
+            "Mean(If($high - $low > Abs($high - Ref($close, 1)), "
+            "If($high - $low > Abs($low - Ref($close, 1)), $high - $low, Abs($low - Ref($close, 1))), "
+            "If(Abs($high - Ref($close, 1)) > Abs($low - Ref($close, 1)), Abs($high - Ref($close, 1)), Abs($low - Ref($close, 1)))), 14) / $close",
+        ),
+        # Volume/Liquidity (4 factors)
+        ("turnover_ratio", "$volume / Ref($volume, 5)"),
+        ("volume_ma_ratio_5_20", "Mean($volume, 5) / Mean($volume, 20)"),
+        (
+            "obv_slope",
+            "Sum(If($close > Ref($close, 1), $volume, -$volume), 10) "
+            "/ Sum($volume, 10)",
+        ),
+        (
+            "vwap_deviation",
+            "Sum($close * $volume, 5) / Sum($volume, 5) / $close - 1",
+        ),
+        # Price Pattern (3 factors)
+        ("price_to_ma5", "$close / Mean($close, 5) - 1"),
+        ("price_to_ma20", "$close / Mean($close, 20) - 1"),
+        ("price_to_ma60", "$close / Mean($close, 60) - 1"),
+        # Quality/Strength (2 factors)
+        (
+            "rsi_14",
+            "100 - 100 / (1 + Mean(If($close - Ref($close, 1) > 0, $close - Ref($close, 1), 0), 14) "
+            "/ Mean(If(Ref($close, 1) - $close > 0, Ref($close, 1) - $close, 0), 14))",
+        ),
+        (
+            "upper_shadow_ratio",
+            "($high - If($close > $open, $close, $open)) / ($high - $low + 1e-8)",
+        ),
     ]
     factors: dict[str, float] = {}
     for name, expr in factor_exprs:

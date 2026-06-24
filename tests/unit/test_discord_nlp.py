@@ -67,19 +67,19 @@ class TestClassifyMessage:
         intent, _ = self._classify("指数还会涨吗")
         assert intent == "market_overview"
 
-    # ── Recommend ───────────────────────────────────────────────
+    # ── Recommend → agent_qa (recommendation system removed) ────
 
     def test_recommend_keyword(self):
         intent, _ = self._classify("股票推荐")
-        assert intent == "recommend"
+        assert intent == "agent_qa"
 
     def test_recommend_keyword_xuangu(self):
         intent, _ = self._classify("今天选股有什么好的")
-        assert intent == "recommend"
+        assert intent == "agent_qa"
 
     def test_recommend_keyword_niugu(self):
         intent, _ = self._classify("有什么好股推荐")
-        assert intent == "recommend"
+        assert intent == "agent_qa"
 
     # ── Intel / news ─────────────────────────────────────────────
 

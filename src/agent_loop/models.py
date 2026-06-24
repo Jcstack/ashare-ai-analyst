@@ -7,6 +7,20 @@ from enum import Enum
 from typing import Any
 
 
+@dataclass
+class ContingencyRule:
+    """Execution contingency rule attached to a TradeProposal.
+
+    Tells the execution trader what to do if specific conditions occur
+    after the trade is placed.
+    """
+
+    condition: str  # e.g. "价格跌破 XX 元" or "涨幅超过 5%"
+    action: str  # e.g. "减仓50%" or "全部卖出" or "追加买入"
+    priority: str  # "critical" | "important" | "optional"
+    expiry_session: str  # "morning" | "afternoon" | "next_day"
+
+
 class UrgencyTier(Enum):
     CRITICAL = "critical"
     HIGH = "high"
@@ -74,6 +88,7 @@ class AggregatedSignal:
     urgency: UrgencyTier
     reason: str
     priority_score: float = 0.0
+    source_count: int = 1  # number of independent source domains contributing
     metadata: dict[str, Any] = field(default_factory=dict)
     signal_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -88,6 +103,7 @@ class AggregatedSignal:
             "confidence": self.confidence,
             "urgency": self.urgency.value,
             "priority_score": self.priority_score,
+            "source_count": self.source_count,
             "reason": self.reason,
             "metadata": self.metadata,
             "timestamp": self.timestamp.isoformat(),
@@ -113,6 +129,7 @@ class TradeProposal:
     portfolio_impact: dict[str, Any] = field(default_factory=dict)
     overnight_risk_pct: float | None = None
     reasoning_chain: list[str] = field(default_factory=list)
+    contingencies: list[ContingencyRule] = field(default_factory=list)
     proposal_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -136,6 +153,15 @@ class TradeProposal:
             "portfolio_impact": self.portfolio_impact,
             "overnight_risk_pct": self.overnight_risk_pct,
             "reasoning_chain": self.reasoning_chain,
+            "contingencies": [
+                {
+                    "condition": c.condition,
+                    "action": c.action,
+                    "priority": c.priority,
+                    "expiry_session": c.expiry_session,
+                }
+                for c in self.contingencies
+            ],
             "created_at": self.created_at.isoformat(),
         }
 
@@ -176,6 +202,46 @@ class CycleResult:
             "theses_invalidated": self.theses_invalidated,
             "outcomes_checked": self.outcomes_checked,
             "errors": self.errors,
+        }
+
+
+@dataclass
+class PortfolioContext:
+    """Full portfolio context for signal evaluation.
+
+    Combines position data, risk budget, regime information, and
+    belief-state-derived limits into a single context object.
+    """
+
+    positions: list[dict[str, Any]] = field(default_factory=list)
+    total_value: float = 0.0
+    cash: float = 0.0
+    cash_pct: float = 0.0
+    sector_weights: dict[str, float] = field(default_factory=dict)
+    theme_weights: dict[str, float] = field(default_factory=dict)
+    active_theses: list[dict[str, Any]] = field(default_factory=list)
+    weakest_thesis: dict[str, Any] | None = None
+    risk_budget_remaining: float = 0.03
+    sentiment_phase: str = "unknown"
+    max_position_pct: float = 0.20
+    max_equity_pct: float = 0.50
+    buys_allowed: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total_value": self.total_value,
+            "cash": self.cash,
+            "cash_pct": self.cash_pct,
+            "position_count": len(self.positions),
+            "sector_weights": self.sector_weights,
+            "theme_weights": self.theme_weights,
+            "active_theses_count": len(self.active_theses),
+            "weakest_thesis": self.weakest_thesis,
+            "risk_budget_remaining": self.risk_budget_remaining,
+            "sentiment_phase": self.sentiment_phase,
+            "max_position_pct": self.max_position_pct,
+            "max_equity_pct": self.max_equity_pct,
+            "buys_allowed": self.buys_allowed,
         }
 
 

@@ -153,6 +153,10 @@ class CircuitBreaker:
                     f"（{self.config.weekly_loss_threshold:.1%}）"
                 )
 
+        # Persist state change to Redis
+        if self._state != BreakerState.NORMAL or self._consecutive_halts == 0:
+            self.save_to_redis()
+
         return BreakerStatus(
             state=self._state,
             triggered_at=self._triggered_at,
@@ -165,12 +169,80 @@ class CircuitBreaker:
             warnings=warnings,
         )
 
+    def is_halted(self) -> bool:
+        """Quick check: is trading currently halted?
+
+        Loads persisted state from Redis if available, then checks
+        if cooldown has expired.
+        """
+        self.load_from_redis()
+        today = date.today()
+        if self._state != BreakerState.NORMAL:
+            if self._resume_at and today >= self._resume_at:
+                self._state = BreakerState.NORMAL
+                self._triggered_at = None
+                self._resume_at = None
+                self.save_to_redis()
+                return False
+            return True
+        return False
+
+    def save_to_redis(self) -> None:
+        """Persist circuit breaker state to Redis (24h TTL)."""
+        try:
+            import json
+
+            from src.web.dependencies import get_redis
+
+            r = get_redis()
+            if r is None:
+                return
+            data = {
+                "state": self._state.value,
+                "triggered_at": self._triggered_at.isoformat()
+                if self._triggered_at
+                else None,
+                "resume_at": self._resume_at.isoformat() if self._resume_at else None,
+                "consecutive_halts": self._consecutive_halts,
+            }
+            r.setex(
+                "risk:circuit_breaker",
+                86400,  # 24h TTL
+                json.dumps(data),
+            )
+        except Exception:
+            logger.debug("Failed to save circuit breaker to Redis", exc_info=True)
+
+    def load_from_redis(self) -> None:
+        """Load circuit breaker state from Redis if available."""
+        try:
+            import json
+
+            from src.web.dependencies import get_redis
+
+            r = get_redis()
+            if r is None:
+                return
+            raw = r.get("risk:circuit_breaker")
+            if not raw:
+                return
+            data = json.loads(raw)
+            self._state = BreakerState(data.get("state", "normal"))
+            triggered = data.get("triggered_at")
+            self._triggered_at = date.fromisoformat(triggered) if triggered else None
+            resume = data.get("resume_at")
+            self._resume_at = date.fromisoformat(resume) if resume else None
+            self._consecutive_halts = data.get("consecutive_halts", 0)
+        except Exception:
+            logger.debug("Failed to load circuit breaker from Redis", exc_info=True)
+
     def reset(self) -> None:
         """Manually reset the circuit breaker to normal state."""
         self._state = BreakerState.NORMAL
         self._triggered_at = None
         self._resume_at = None
         self._consecutive_halts = 0
+        self.save_to_redis()
 
     def _get_trigger_reason(self) -> str:
         if self._state == BreakerState.DAILY_HALT:

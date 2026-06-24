@@ -91,12 +91,22 @@ class GlobalMarketFetcher:
             results: dict[str, dict] = {}
             try:
                 tickers = yf.Tickers(" ".join(symbols))
+                ticker_dict = getattr(tickers, "tickers", None) or {}
+                if not ticker_dict:
+                    logger.warning(
+                        "yfinance Tickers.tickers is None/empty — batch may have failed"
+                    )
                 for sym in symbols:
                     try:
-                        ticker = tickers.tickers.get(sym)
+                        try:
+                            ticker = ticker_dict[sym]
+                        except (KeyError, TypeError, IndexError):
+                            continue
                         if ticker is None:
                             continue
-                        info = ticker.fast_info
+                        info = getattr(ticker, "fast_info", None)
+                        if info is None:
+                            continue
                         last_price = getattr(info, "last_price", None)
                         prev_close = getattr(info, "previous_close", None)
                         if last_price is not None:
@@ -257,6 +267,22 @@ class GlobalMarketFetcher:
 
         self._set_cached("snapshot", result)
         return result
+
+    def get_cached_snapshot(self) -> dict:
+        """Return cached global snapshot, fetching if stale.
+
+        Alias for :meth:`fetch_global_snapshot` (which already uses
+        in-memory caching with TTL).  Callers in trading_loop and
+        investment_director use this name.
+        """
+        return self.fetch_global_snapshot()
+
+    def fetch_snapshot(self) -> dict:
+        """Alias for :meth:`fetch_global_snapshot`.
+
+        Used by the LLM prewarm pipeline.
+        """
+        return self.fetch_global_snapshot()
 
     def fetch_bond_yields(self) -> dict[str, float]:
         """Fetch US Treasury bond yields.

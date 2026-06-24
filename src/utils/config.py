@@ -4,10 +4,15 @@ Loads YAML configuration files from the config/ directory.
 All runtime parameters are config-driven per PRD NFR-003.
 """
 
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+# Config names are simple lowercase identifiers (e.g. "llm", "recommendation").
+# Restricting to this pattern prevents path traversal via crafted names.
+_CONFIG_NAME_PATTERN = re.compile(r"[a-z0-9_]+")
 
 
 def get_project_root() -> Path:
@@ -65,7 +70,10 @@ def load_config(config_name: str) -> dict[str, Any]:
     Raises:
         FileNotFoundError: If the config file does not exist.
         yaml.YAMLError: If the YAML is malformed.
+        ValueError: If config_name is not a simple lowercase identifier.
     """
+    if not _CONFIG_NAME_PATTERN.fullmatch(config_name):
+        raise ValueError(f"Invalid config name: {config_name!r}")
     config_path = get_project_root() / "config" / f"{config_name}.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -88,7 +96,10 @@ def save_config(config_name: str, data: dict[str, Any]) -> None:
 
     Raises:
         OSError: If file writing fails.
+        ValueError: If config_name is not a simple lowercase identifier.
     """
+    if not _CONFIG_NAME_PATTERN.fullmatch(config_name):
+        raise ValueError(f"Invalid config name: {config_name!r}")
     config_path = get_project_root() / "config" / f"{config_name}.yaml"
     # Create backup if file exists
     if config_path.exists():

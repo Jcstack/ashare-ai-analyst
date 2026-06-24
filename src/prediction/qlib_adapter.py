@@ -319,7 +319,7 @@ class QlibAdapter:
             lookback = self._config.get("ic_lookback_days", 60)
             pred_data = QlibData.features(
                 [qlib_code],
-                fields=["Ref($close, -1)/$close - 1"],
+                fields=["$close/Ref($close, 1) - 1"],
                 start_time=f"-{lookback}d",
             )
             if pred_data is None or pred_data.empty or len(pred_data) < 10:
@@ -334,8 +334,8 @@ class QlibAdapter:
         try:
             qlib_code = self._to_qlib_code(symbol)
             factor_exprs = [
-                ("momentum_5d", "Ref($close, -5)/$close - 1"),
-                ("momentum_20d", "Ref($close, -20)/$close - 1"),
+                ("momentum_5d", "$close/Ref($close, 5) - 1"),
+                ("momentum_20d", "$close/Ref($close, 20) - 1"),
                 ("volatility_20d", "Std($close, 20)/Mean($close, 20)"),
                 ("turnover_ratio", "$volume/Ref($volume, 5)"),
                 ("price_to_ma20", "$close/Mean($close, 20) - 1"),

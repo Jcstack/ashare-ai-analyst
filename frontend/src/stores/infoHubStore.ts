@@ -20,6 +20,9 @@ interface InfoHubState {
   // Bookmarked-only mode
   bookmarkedOnly: boolean
 
+  // Show only items related to portfolio/watchlist symbols
+  relevanceOnly: boolean
+
   // Intelligence preferences
   diversityStrength: DiversityStrength
   userDomains: string[]
@@ -34,6 +37,7 @@ interface InfoHubState {
   setPriorityFilter: (priority: InfoPriority | undefined) => void
   setSortBy: (sortBy: SortBy) => void
   setBookmarkedOnly: (value: boolean) => void
+  setRelevanceOnly: (value: boolean) => void
   resetFilters: () => void
 
   // Intelligence preference actions
@@ -52,6 +56,7 @@ export const useInfoHubStore = create<InfoHubState>((set) => ({
   priorityFilter: undefined,
   sortBy: "time",
   bookmarkedOnly: false,
+  relevanceOnly: false,
 
   // Intelligence preferences defaults
   diversityStrength: "medium",
@@ -66,12 +71,14 @@ export const useInfoHubStore = create<InfoHubState>((set) => ({
   setPriorityFilter: (priority) => set({ priorityFilter: priority }),
   setSortBy: (sortBy) => set({ sortBy }),
   setBookmarkedOnly: (value) => set({ bookmarkedOnly: value }),
+  setRelevanceOnly: (value) => set({ relevanceOnly: value }),
   resetFilters: () =>
     set({
       searchQuery: "",
       priorityFilter: undefined,
       sortBy: "time",
       bookmarkedOnly: false,
+      relevanceOnly: false,
     }),
 
   // Intelligence preference actions

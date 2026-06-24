@@ -145,9 +145,19 @@ class ConceptAnalyzer:
         # Sort by heat_score descending
         items.sort(key=lambda x: x.heat_score, reverse=True)
 
-        # Fetch leader stock for top N
-        for item in items[:top_n]:
-            self._fill_leader(item)
+        # Fetch leader stock for top N (parallel, with individual timeouts)
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=5, thread_name_prefix="concept-leader"
+        ) as pool:
+            futures = {
+                pool.submit(self._fill_leader, item): item for item in items[:top_n]
+            }
+            concurrent.futures.wait(futures, timeout=10)
+            for f in futures:
+                if not f.done():
+                    f.cancel()
 
         # Cache the full result for subsequent requests
         self._rank_cache = (time.time(), items[:top_n])

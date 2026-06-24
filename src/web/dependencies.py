@@ -8,7 +8,18 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from src.utils.logger import get_logger
 from src.web.services.stock_service import StockService
+
+logger = get_logger(__name__)
+
+
+@lru_cache(maxsize=1)
+def get_ai_news_service():
+    """Return a singleton AiNewsService instance."""
+    from src.web.services.ai_news_service import AiNewsService
+
+    return AiNewsService()
 
 
 @lru_cache(maxsize=1)
@@ -390,6 +401,14 @@ def get_conversation_service():
 
 
 @lru_cache(maxsize=1)
+def get_message_store():
+    """Return a singleton MessageStore instance."""
+    from src.web.services.message_store import MessageStore
+
+    return MessageStore()
+
+
+@lru_cache(maxsize=1)
 def get_capital_service():
     """Return a singleton CapitalService instance."""
     from src.web.services.capital_service import CapitalService
@@ -476,6 +495,9 @@ def get_tool_registry():
             "capital_flow_service": get_capital_flow_service(),
             "web_search_service": get_web_search_service(),
             "fusion_engine": get_signal_fusion_engine(),
+            "minute_bar_fetcher": get_minute_bar_fetcher(),
+            "gateway": get_llm_gateway(),
+            "execution_bridge": get_execution_bridge(),
         }
     )
     return registry
@@ -694,6 +716,61 @@ def get_redis():
         return redis.from_url(broker, decode_responses=True)
     except Exception:
         return None
+
+
+@lru_cache(maxsize=1)
+def get_kill_switch():
+    """Return a singleton KillSwitch backed by the shared Redis instance."""
+    from src.trading.kill_switch import KillSwitch
+
+    return KillSwitch(redis_client=get_redis())
+
+
+@lru_cache(maxsize=1)
+def get_preflight():
+    """Return a singleton PreflightRiskCheck."""
+    from src.trading.preflight import PreflightRiskCheck
+    from src.web.services.broker_interface import create_broker
+    from src.utils.config import load_config
+
+    try:
+        cfg = load_config("broker")
+    except Exception:
+        cfg = {}
+    max_order = cfg.get("qmt", {}).get("max_order_amount", 100_000)
+
+    return PreflightRiskCheck(
+        kill_switch=get_kill_switch(),
+        broker=create_broker(),
+        max_order_amount=max_order,
+    )
+
+
+@lru_cache(maxsize=1)
+def get_execution_bridge():
+    """Return a singleton ExecutionBridge (None in simulation mode)."""
+    from src.utils.config import load_config
+
+    try:
+        cfg = load_config("broker")
+    except Exception:
+        cfg = {}
+
+    if cfg.get("mode", "simulation") == "simulation":
+        return None
+
+    from src.trading.execution_bridge import ExecutionBridge
+    from src.web.services.broker_interface import create_broker
+
+    exec_cfg = cfg.get("execution", {})
+    return ExecutionBridge(
+        broker=create_broker(),
+        gate=get_confirmation_gate(),
+        preflight=get_preflight(),
+        kill_switch=get_kill_switch(),
+        execution_mode=exec_cfg.get("mode", "dry_run"),
+        max_price_slippage_pct=exec_cfg.get("max_price_slippage_pct", 2.0),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -1101,14 +1178,6 @@ def get_review_agent():
 
 
 @lru_cache(maxsize=1)
-def get_session_strategy_router():
-    """Return a singleton SessionStrategyRouter with shared screener."""
-    from src.recommendation.session_strategies import SessionStrategyRouter
-
-    return SessionStrategyRouter(screener=get_stock_screener())
-
-
-@lru_cache(maxsize=1)
 def get_recommendation_service():
     """Return a singleton RecommendationService with all dependencies."""
     from src.web.services.recommendation_service import RecommendationService
@@ -1119,7 +1188,6 @@ def get_recommendation_service():
         review_agent=get_review_agent(),
         user_config_service=get_user_config_service(),
         redis_client=get_redis(),
-        session_router=get_session_strategy_router(),
         info_store=get_info_store(),
         realtime_quote_manager=get_realtime_quote_manager(),
         macro_radar=get_macro_radar_service(),
@@ -1231,11 +1299,34 @@ def get_relevance_scorer():
 
 
 @lru_cache(maxsize=1)
-def get_debate_engine():
-    """Return a singleton DebateEngine for bull/bear adversarial analysis."""
-    from src.intelligence.debate_engine import DebateEngine
+def get_debate_memory():
+    """Return a singleton DebateMemory for debate history retrieval."""
+    from src.intelligence.debate_memory import DebateMemory
 
-    return DebateEngine()
+    return DebateMemory()
+
+
+@lru_cache(maxsize=1)
+def get_debate_engine():
+    """Return LLMDebateEngine (Phase 2) with Phase 1 fallback.
+
+    Uses the LLM gateway for multi-round adversarial debate.
+    Falls back to rule-based DebateEngine if LLM unavailable.
+    """
+    from src.intelligence.debate_engine import DebateEngine, LLMDebateEngine
+
+    fallback = DebateEngine()
+    try:
+        gateway = get_llm_gateway()
+        memory = get_debate_memory()
+        return LLMDebateEngine(
+            gateway=gateway,
+            memory=memory,
+            fallback_engine=fallback,
+        )
+    except Exception as exc:
+        logger.warning("LLMDebateEngine init failed, using Phase 1: %s", exc)
+        return fallback
 
 
 @lru_cache(maxsize=1)
@@ -1287,6 +1378,22 @@ def get_thesis_store():
 
 
 @lru_cache(maxsize=1)
+def get_thesis_tracker():
+    """Return a singleton ThesisTracker for thesis lifecycle management."""
+    from src.agent_loop.thesis_tracker import ThesisTracker
+
+    return ThesisTracker()
+
+
+@lru_cache(maxsize=1)
+def get_thesis_service():
+    """Return a singleton ThesisService wrapping the ThesisTracker."""
+    from src.web.services.thesis_service import ThesisService
+
+    return ThesisService(tracker=get_thesis_tracker())
+
+
+@lru_cache(maxsize=1)
 def get_signal_aggregator():
     """Return a singleton SignalAggregator for multi-source signal merge."""
     from src.agent_loop.signal_aggregator import SignalAggregator
@@ -1329,8 +1436,71 @@ def get_ashare_constraint_checker():
 
 
 @lru_cache(maxsize=1)
+def get_sentiment_cycle_detector():
+    """Return a singleton SentimentCycleDetector."""
+    from src.agent_loop.sentiment_cycle import SentimentCycleDetector
+
+    return SentimentCycleDetector()
+
+
+@lru_cache(maxsize=1)
+def get_reflexivity_detector():
+    """Return a singleton ReflexivityDetector."""
+    from src.agent_loop.reflexivity_detector import ReflexivityDetector
+
+    return ReflexivityDetector()
+
+
+@lru_cache(maxsize=1)
+def get_sector_correlation_monitor():
+    """Return a singleton SectorCorrelationMonitor."""
+    from src.data.sector_correlation import SectorCorrelationMonitor
+
+    return SectorCorrelationMonitor()
+
+
+@lru_cache(maxsize=1)
+def get_mtf_engine():
+    """Return a singleton MultiTimeframeEngine."""
+    from src.quant.multi_timeframe import MultiTimeframeEngine
+
+    return MultiTimeframeEngine()
+
+
+@lru_cache(maxsize=1)
+def get_minute_bar_fetcher():
+    """Return a singleton MinuteBarFetcher backed by Redis."""
+    from src.data.minute_bar import MinuteBarFetcher
+
+    return MinuteBarFetcher(redis_client=get_redis())
+
+
+@lru_cache(maxsize=1)
+def get_leader_detector():
+    """Return a singleton LeaderDetector."""
+    from src.agent_loop.leader_detector import LeaderDetector
+
+    return LeaderDetector()
+
+
+@lru_cache(maxsize=1)
+def get_llm_budget_tracker():
+    """Return a singleton LLMBudgetTracker backed by Redis."""
+    from src.llm.llm_budget import LLMBudgetTracker
+    from src.utils.config import load_config
+
+    try:
+        budget_config = load_config("llm").get("budget", {})
+    except Exception:
+        budget_config = {}
+
+    return LLMBudgetTracker(redis_client=get_redis(), config=budget_config)
+
+
+@lru_cache(maxsize=1)
 def get_decision_pipeline():
     """Return a singleton DecisionPipeline for signal-to-proposal conversion."""
+    from src.agent_loop.bayesian_belief import BayesianBeliefEngine, CalibrationStore
     from src.agent_loop.decision_pipeline import DecisionPipeline
     from src.utils.config import load_config
 
@@ -1349,11 +1519,21 @@ def get_decision_pipeline():
         )
     )
 
+    calibration_store = CalibrationStore()
+    loaded = calibration_store.load_empirical_tables()
+    if loaded > 0:
+        logger.info("Loaded %d empirical Bayesian calibration buckets", loaded)
+
     return DecisionPipeline(
         debate_engine=get_debate_engine(),
         calibrator=get_confidence_calibrator(),
         constraint_checker=get_ashare_constraint_checker(),
         position_sizer=sizer,
+        bayesian_engine=BayesianBeliefEngine(calibration_store=calibration_store),
+        sentiment_detector=get_sentiment_cycle_detector(),
+        budget_tracker=get_llm_budget_tracker(),
+        thesis_tracker=get_thesis_tracker(),
+        leader_detector=get_leader_detector(),
         config=config,
     )
 
@@ -1369,7 +1549,7 @@ def get_trading_loop():
     except Exception:
         config = {}
 
-    return AutonomousTradingLoop(
+    loop = AutonomousTradingLoop(
         thesis_store=get_thesis_store(),
         signal_aggregator=get_signal_aggregator(),
         decision_pipeline=get_decision_pipeline(),
@@ -1386,9 +1566,46 @@ def get_trading_loop():
         position_macro_mapper=get_position_macro_mapper(),
         decision_log=get_decision_log(),
         intel_bridge=get_intel_bridge(),
+        reflexivity_detector=get_reflexivity_detector(),
+        sentiment_cycle_detector=get_sentiment_cycle_detector(),
+        sector_correlation_monitor=get_sector_correlation_monitor(),
+        mtf_engine=get_mtf_engine(),
+        minute_bar_fetcher=get_minute_bar_fetcher(),
+        leader_detector=get_leader_detector(),
         calibrator=get_confidence_calibrator(),
+        action_queue_service=get_action_queue_service(),
         config=config,
     )
+
+    # Wire OutcomeTracker with a real price fetcher so the LEARN phase works
+    try:
+        from src.agent_loop.outcome_tracker import OutcomeTracker
+
+        async def _price_fetcher(symbol: str, date_str: str) -> float | None:
+            """Fetch closing price for outcome evaluation."""
+            from src.data.fetcher import DataFetcher
+
+            try:
+                fetcher = DataFetcher()
+                date_compact = date_str.replace("-", "")
+                df = fetcher.fetch_daily_ohlcv(
+                    symbol, start_date=date_compact, end_date=date_compact
+                )
+                if df is not None and not df.empty and "close" in df.columns:
+                    return float(df.iloc[-1]["close"])
+            except Exception:
+                pass
+            return None
+
+        loop.set_outcome_tracker(OutcomeTracker(), _price_fetcher)
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to wire OutcomeTracker into trading loop: %s", exc
+        )
+
+    return loop
 
 
 @lru_cache(maxsize=1)
@@ -1427,3 +1644,129 @@ def get_signal_generation_service():
         user_config_service=get_user_config_service(),
         macro_radar=get_macro_radar_service(),
     )
+
+
+@lru_cache(maxsize=1)
+def get_action_queue_service():
+    """Return a singleton ActionQueueService instance."""
+    from src.web.services.action_queue_service import ActionQueueService
+
+    return ActionQueueService()
+
+
+@lru_cache(maxsize=1)
+def get_shared_belief_state():
+    """Return a singleton SharedBeliefState backed by Redis."""
+    from src.agent_loop.shared_belief_state import SharedBeliefState
+
+    belief = SharedBeliefState(redis_client=get_redis())
+    belief.load_from_redis()
+    return belief
+
+
+@lru_cache(maxsize=1)
+def get_convergence_engine():
+    """Return a singleton ConvergenceEngine."""
+    from src.agent_loop.convergence_engine import ConvergenceEngine
+
+    return ConvergenceEngine()
+
+
+@lru_cache(maxsize=1)
+def get_call_auction_provider():
+    """Return a singleton CallAuctionCollector."""
+    from src.data.call_auction import CallAuctionCollector
+
+    return CallAuctionCollector()
+
+
+@lru_cache(maxsize=1)
+def get_signal_collector_factory():
+    """Return a singleton SignalCollectorFactory with all data sources."""
+    from src.agent_loop.signal_collector_factory import SignalCollectorFactory
+
+    return SignalCollectorFactory(
+        signal_store=get_signal_store(),
+        sector_flow_fetcher=get_sector_flow_fetcher(),
+        macro_flow_fetcher=get_macro_flow_fetcher(),
+        leader_detector=get_leader_detector(),
+        minute_bar_fetcher=get_minute_bar_fetcher(),
+        info_store=get_info_store(),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_investment_director():
+    """Return a singleton InvestmentDirector — the top-level orchestrator."""
+    from src.agent_loop.investment_director import InvestmentDirector
+    from src.utils.config import load_config
+
+    try:
+        config = load_config("trading_loop").get("trading_loop", {})
+    except Exception:
+        config = {}
+
+    return InvestmentDirector(
+        belief_state=get_shared_belief_state(),
+        signal_aggregator=get_signal_aggregator(),
+        decision_pipeline=get_decision_pipeline(),
+        portfolio_store=get_portfolio_store(),
+        capital_service=get_capital_service(),
+        notification_dispatcher=get_notification_dispatcher(),
+        regime_detector=get_regime_detector(),
+        debate_engine=get_debate_engine(),
+        thesis_store=get_thesis_store(),
+        global_market_fetcher=get_global_market_fetcher(),
+        decision_log=get_decision_log(),
+        calibrator=get_confidence_calibrator(),
+        convergence_engine=get_convergence_engine(),
+        thesis_tracker=get_thesis_tracker(),
+        call_auction_provider=get_call_auction_provider(),
+        action_queue_service=get_action_queue_service(),
+        signal_collector=get_signal_collector_factory(),
+        risk_agent=get_risk_agent(),
+        config=config,
+    )
+
+
+@lru_cache(maxsize=1)
+def get_risk_agent():
+    """Return a singleton RiskAgent — independent veto power over buy decisions."""
+    from src.agent_loop.multi_agent_risk import RiskAgent
+
+    try:
+        return RiskAgent(
+            gateway=get_llm_gateway(),
+            tool_registry=get_tool_registry(),
+            kill_switch=get_kill_switch(),
+            circuit_breaker=get_circuit_breaker(),
+        )
+    except Exception as exc:
+        logger.warning("RiskAgent init failed (will skip risk review): %s", exc)
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_factor_validator():
+    """Return a singleton FactorValidator instance."""
+    from src.agent_loop.factor_validator import FactorValidator
+
+    return FactorValidator()
+
+
+@lru_cache(maxsize=1)
+def get_knowledge_graph():
+    """Return a singleton KnowledgeGraph — temporal entity-relationship world model."""
+    from src.intelligence.knowledge_graph import KnowledgeGraph
+
+    return KnowledgeGraph()
+
+
+@lru_cache(maxsize=1)
+def get_impact_engine():
+    """Return a singleton EventImpactEngine with CausalChainConstructor."""
+    from src.intelligence.causal_chain import CausalChainConstructor
+    from src.intelligence.impact_engine import EventImpactEngine
+
+    constructor = CausalChainConstructor()
+    return EventImpactEngine(chain_constructor=constructor)

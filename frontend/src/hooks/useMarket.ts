@@ -22,12 +22,13 @@ export function useMarketIndices() {
   })
 }
 
-export function useRealtimeQuotes() {
+export function useRealtimeQuotes(symbols?: string[]) {
   return useQuery({
-    queryKey: ["realtime-quotes"],
-    queryFn: ({ signal }) => fetchRealtimeQuotes(undefined, signal),
+    queryKey: ["realtime-quotes", symbols],
+    queryFn: ({ signal }) => fetchRealtimeQuotes(symbols?.length ? symbols : undefined, signal),
     refetchInterval: 30_000, // Safety-net polling (WS/SSE preferred)
     staleTime: 5_000,
+    enabled: symbols === undefined || symbols.length > 0,
   })
 }
 

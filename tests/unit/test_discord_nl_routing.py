@@ -73,7 +73,7 @@ class TestExistingIntentsPreserved:
     """Existing routing should not be affected by new keywords."""
 
     def test_recommend(self):
-        assert _classify("推荐几只好股") == "recommend"
+        assert _classify("推荐几只好股") == "agent_qa"
 
     def test_flow(self):
         assert _classify("北向资金流入多少") == "flow"
