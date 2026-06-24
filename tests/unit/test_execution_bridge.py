@@ -38,6 +38,9 @@ def mock_broker() -> MagicMock:
 @pytest.fixture
 def mock_gate() -> MagicMock:
     gate = MagicMock()
+    # Use an in-memory DB path so ExecutionBridge._update_gate_metadata's direct
+    # sqlite3.connect() does not create a junk file named after the mock in cwd.
+    gate._db_path = ":memory:"
     gate_req = MagicMock()
     gate_req.request_id = "gate-123"
     gate.create_request.return_value = gate_req

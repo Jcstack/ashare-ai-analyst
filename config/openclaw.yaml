@@ -178,7 +178,25 @@ beat_schedule:
         day_of_week: "*"
     description: "全球市场快照 (每15分钟, 7-23时, 含假期)"
 
-  # v28.0: recommendation_generate/backfill — REMOVED in v38.0 AI-first refactor
+  # v28.0: Smart stock recommendation generation (every 10 min during trading hours)
+  recommendation_generate:
+    task: "openclaw.tasks.recommendation_pipeline.task_recommendation_generate"
+    schedule:
+      crontab:
+        minute: "*/10"
+        hour: "9-15"
+        day_of_week: "1-5"
+    description: "智能选股推荐生成 (交易时段每10分钟)"
+
+  # v28.0: Recommendation outcome backfill (daily at 16:45)
+  recommendation_backfill:
+    task: "openclaw.tasks.recommendation_backfill.task_recommendation_backfill"
+    schedule:
+      crontab:
+        hour: 16
+        minute: 45
+        day_of_week: "1-5"
+    description: "推荐结果回填 T+N 实际表现 (16:45 CST)"
 
   # I-068: LLM result pre-warming (market overview + sentiment report every 30min, hot stocks pre-open)
   prewarm_market_overview:
@@ -658,7 +676,15 @@ beat_schedule:
   # day_of_week: "1-5"
   # description: "InvestorAgent: 午后全市场扫描 (13:03)"
 
-  # v28.0: recommendation_cleanup — REMOVED in v38.0 AI-first refactor
+  # v28.0: Expire old recommendations (daily at 18:30)
+  recommendation_cleanup:
+    task: "openclaw.tasks.recommendation_cleanup.task_recommendation_cleanup"
+    schedule:
+      crontab:
+        hour: 18
+        minute: 30
+        day_of_week: "1-5"
+    description: "过期推荐清理 (每日18:30)"
 
 # v3.2 FR-SS001: Timeline scheduling profiles
 timeline:

@@ -9,6 +9,7 @@ import {
   Search,
   BarChart3,
   Globe,
+  Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -29,6 +30,7 @@ const navItems: NavItem[] = [
   { to: "/portfolio", label: "持仓", icon: Briefcase },
   { to: "/review", label: "复盘", icon: BarChart3 },
   { to: "/ai-news", label: "AI 资讯", icon: Globe },
+  { to: "/recommendations", label: "智能选股", icon: Sparkles },
   { to: "/settings", label: "设置", icon: Settings },
 ]
 

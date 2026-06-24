@@ -33,6 +33,7 @@ from src.web.routes.api_v1 import (
     portfolio,
     predictions,
     prompts,
+    recommendations,
     regime,
     review,
     scheduler,
@@ -62,6 +63,7 @@ router.include_router(admin.router, prefix="/admin")
 router.include_router(settings.router, prefix="/settings")
 router.include_router(strategy_lab.router, prefix="/strategy-lab")
 router.include_router(prompts.router, prefix="/prompts")
+router.include_router(recommendations.router, prefix="/recommendations")
 router.include_router(global_market.router, prefix="/global-market")
 router.include_router(advisor.router, prefix="/advisor")
 router.include_router(holiday_research.router, prefix="/advisor/holiday-research")

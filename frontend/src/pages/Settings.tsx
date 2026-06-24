@@ -6,10 +6,12 @@ import { TradingSettingsTab } from "@/components/settings/TradingSettingsTab"
 import { LLMSettingsTab } from "@/components/settings/LLMSettingsTab"
 import { UserFollowsSettingsTab } from "@/components/settings/UserFollowsSettingsTab"
 import { IntelligencePrefsTab } from "@/components/settings/IntelligencePrefsTab"
+import { InvestmentStyleSettingsTab } from "@/components/settings/InvestmentStyleSettingsTab"
 
 const TABS = [
   { value: "appearance", label: "外观" },
   { value: "trading", label: "投资" },
+  { value: "style", label: "选股偏好" },
   { value: "follows", label: "关注配置" },
   { value: "intelligence", label: "情报偏好" },
   { value: "notifications", label: "通知与推送" },
@@ -49,6 +51,10 @@ export default function Settings() {
 
         <TabsContent value="trading" className="mt-6">
           <TradingSettingsTab />
+        </TabsContent>
+
+        <TabsContent value="style" className="mt-6">
+          <InvestmentStyleSettingsTab />
         </TabsContent>
 
         <TabsContent value="follows" className="mt-6">

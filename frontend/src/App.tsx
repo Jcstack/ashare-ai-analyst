@@ -17,6 +17,7 @@ import Portfolio from "@/pages/Portfolio"
 import Review from "@/pages/Review"
 import SignalDetail from "@/pages/SignalDetail"
 import AiNews from "@/pages/AiNews"
+import Recommendations from "@/pages/Recommendations"
 
 /** Global realtime provider — WS push (auto-degrades to SSE), with HTTP polling safety net. */
 function GlobalRealtimeProvider() {
@@ -83,6 +84,7 @@ function App() {
             <Route path="/signal/:id" element={<SignalDetail />} />
             <Route path="/stock/:symbol" element={<StockDetail />} />
             <Route path="/ai-news" element={<AiNews />} />
+            <Route path="/recommendations" element={<Recommendations />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>

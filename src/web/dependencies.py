@@ -1136,9 +1136,63 @@ def get_capital_flow_service():
 
 
 @lru_cache(maxsize=1)
+def get_rec_store():
+    """Return a singleton RecStore for recommendation persistence."""
+    from src.recommendation.rec_store import RecStore
+
+    return RecStore()
+
+
+@lru_cache(maxsize=1)
+def get_stock_screener():
+    """Return a singleton StockScreener with config from recommendation.yaml."""
+    from src.recommendation.screener import StockScreener
+    from src.utils.config import load_config
+
+    try:
+        config = load_config("recommendation")
+    except Exception:
+        config = {}
+
+    return StockScreener(config, fusion_engine=get_signal_fusion_engine())
+
+
+@lru_cache(maxsize=1)
+def get_review_agent():
+    """Return a singleton ReviewAgent with shared LLM gateway and trading profile."""
+    from src.recommendation.review_agent import ReviewAgent
+    from src.utils.config import load_config
+
+    try:
+        router = get_llm_gateway()
+    except Exception:
+        router = None
+
+    try:
+        rec_config = load_config("recommendation")
+        trading_profile = rec_config.get("trading_profile", {})
+    except Exception:
+        trading_profile = {}
+
+    return ReviewAgent(llm_router=router, trading_profile=trading_profile)
+
+
+@lru_cache(maxsize=1)
 def get_recommendation_service():
-    """Return None — recommendation module removed in v38.0 AI-first refactor."""
-    return None
+    """Return a singleton RecommendationService with all dependencies."""
+    from src.web.services.recommendation_service import RecommendationService
+
+    return RecommendationService(
+        rec_store=get_rec_store(),
+        screener=get_stock_screener(),
+        review_agent=get_review_agent(),
+        user_config_service=get_user_config_service(),
+        redis_client=get_redis(),
+        info_store=get_info_store(),
+        realtime_quote_manager=get_realtime_quote_manager(),
+        macro_radar=get_macro_radar_service(),
+        report_store=get_intel_report_store(),
+    )
 
 
 @lru_cache(maxsize=1)
