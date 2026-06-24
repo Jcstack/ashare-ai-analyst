@@ -107,7 +107,8 @@ def _score_price_breakout(
         return 15, "站上MA20"
     if price > ma10:
         return 10, "站上MA10"
-    if ma5 <= price <= ma20:
+    # price <= ma20 is already guaranteed by the earlier `price > ma20` return.
+    if ma5 <= price:
         return 5, "价格在MA5-MA20之间, 接近突破"
     return 0, None
 

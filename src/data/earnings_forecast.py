@@ -11,6 +11,7 @@ Data source: datacenter-web.eastmoney.com (direct API).
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -36,7 +37,7 @@ def _safe_float(val: Any, default: float = 0.0) -> float:
         return default
     try:
         f = float(val)
-        return default if f != f else f
+        return default if math.isnan(f) else f
     except (TypeError, ValueError):
         return default
 

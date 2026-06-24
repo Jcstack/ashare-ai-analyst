@@ -12,6 +12,7 @@ making the ledger the single source of truth (no mutable balance column).
 
 from __future__ import annotations
 
+import math
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -469,7 +470,7 @@ class CapitalService:
                             if (
                                 sym
                                 and price is not None
-                                and not (isinstance(price, float) and price != price)
+                                and not (isinstance(price, float) and math.isnan(price))
                             ):
                                 realtime_prices[sym] = float(price)
             except Exception:

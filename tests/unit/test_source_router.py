@@ -165,5 +165,5 @@ class TestDataSourceRouter:
     def test_get_status_returns_all_domains(self, router):
         """get_status should return entries for every SourceDomain."""
         status = router.get_status()
-        for domain in SourceDomain:
+        for domain in list(SourceDomain):
             assert domain.value in status

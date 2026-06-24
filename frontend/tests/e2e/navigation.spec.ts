@@ -18,7 +18,7 @@ test.describe('Navigation', () => {
       { label: '系统设置', path: '/settings' },
     ];
 
-    for (const { label, path } of navLinks) {
+    for (const { label } of navLinks) {
       const link = page.getByRole('link', { name: label });
       await expect(link).toBeVisible({ timeout: 3000 }).catch(() => {
         // Link text may differ slightly from sidebar labels

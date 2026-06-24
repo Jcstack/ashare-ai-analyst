@@ -22,6 +22,7 @@ Auth token: env var ``AKSHARE_PROXY_TOKEN``.
 
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
@@ -73,7 +74,7 @@ def _safe_float(v: Any) -> float | None:
         return None
     try:
         f = float(v)
-        return None if f != f else f  # NaN check
+        return None if math.isnan(f) else f
     except (ValueError, TypeError):
         return None
 

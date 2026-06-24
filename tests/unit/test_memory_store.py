@@ -159,11 +159,13 @@ class TestDelete:
     def test_delete_existing(self, store: MemoryStore):
         mid = store.store("to be deleted")
         assert store.count() == 1
-        assert store.delete(mid) is True
+        deleted = store.delete(mid)
+        assert deleted is True
         assert store.count() == 0
 
     def test_delete_nonexistent(self, store: MemoryStore):
-        assert store.delete("nonexistent") is False
+        deleted = store.delete("nonexistent")
+        assert deleted is False
 
 
 class TestCleanupExpired:

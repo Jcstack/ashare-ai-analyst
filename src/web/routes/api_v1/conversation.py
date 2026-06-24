@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["conversation"])
 
+_GENERIC_ERROR_MESSAGE = "AI对话服务暂时不可用，请稍后再试"
+
 
 @router.post(
     "/stock/{symbol}/conversation",
@@ -56,13 +58,13 @@ async def conversation(
                 position=position,
             )
             return result
-        except Exception as exc:
-            logger.error("Conversation followup failed for %s: %s", symbol, exc)
+        except Exception:
+            logger.exception("Conversation followup failed for %s", symbol)
             return {
                 "status": "error",
                 "session_id": session_id or "",
                 "symbol": symbol,
-                "message": str(exc),
+                "message": _GENERIC_ERROR_MESSAGE,
                 "messages": [],
                 "suggested_questions": [],
                 "disclaimer": "",
@@ -190,13 +192,13 @@ async def conversation(
         )
         return result
 
-    except Exception as exc:
-        logger.error("Conversation start failed for %s: %s", symbol, exc)
+    except Exception:
+        logger.exception("Conversation start failed for %s", symbol)
         return {
             "status": "error",
             "session_id": "",
             "symbol": symbol,
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
             "messages": [],
             "suggested_questions": [],
             "disclaimer": "",

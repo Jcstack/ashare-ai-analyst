@@ -8,9 +8,22 @@ Per PRD Section 6.3 mock strategy:
   - Use tmp_path for file I/O (cache)
 """
 
+from typing import Any, Callable, TypeVar
+
 import pandas as pd
 import pytest
 from unittest.mock import patch
+
+T = TypeVar("T")
+
+
+def _passthrough_em_api_call(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    """Stand-in for ``em_api_call`` that invokes the wrapped callable directly.
+
+    Used as a ``patch`` ``side_effect`` so the East Money proxy retry wrapper is
+    bypassed and the underlying AKShare mock is exercised unchanged.
+    """
+    return fn(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -613,7 +626,7 @@ class TestFetchMarginData:
 
     @patch(
         "src.data.eastmoney_proxy.em_api_call",
-        side_effect=lambda fn, *a, **kw: fn(*a, **kw),
+        side_effect=_passthrough_em_api_call,
     )
     @patch("src.data.fetcher.get_data_dir")
     @patch("src.data.fetcher.load_config")
@@ -645,7 +658,7 @@ class TestFetchMarginData:
 
     @patch(
         "src.data.eastmoney_proxy.em_api_call",
-        side_effect=lambda fn, *a, **kw: fn(*a, **kw),
+        side_effect=_passthrough_em_api_call,
     )
     @patch("src.data.fetcher.get_data_dir")
     @patch("src.data.fetcher.load_config")
@@ -680,7 +693,7 @@ class TestFetchMarginData:
 
     @patch(
         "src.data.eastmoney_proxy.em_api_call",
-        side_effect=lambda fn, *a, **kw: fn(*a, **kw),
+        side_effect=_passthrough_em_api_call,
     )
     @patch("src.data.fetcher.get_data_dir")
     @patch("src.data.fetcher.load_config")
@@ -712,7 +725,7 @@ class TestFetchMarginData:
 
     @patch(
         "src.data.eastmoney_proxy.em_api_call",
-        side_effect=lambda fn, *a, **kw: fn(*a, **kw),
+        side_effect=_passthrough_em_api_call,
     )
     @patch("src.data.fetcher.get_data_dir")
     @patch("src.data.fetcher.load_config")

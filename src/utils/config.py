@@ -74,7 +74,10 @@ def load_config(config_name: str) -> dict[str, Any]:
     """
     if not _CONFIG_NAME_PATTERN.fullmatch(config_name):
         raise ValueError(f"Invalid config name: {config_name!r}")
-    config_path = get_project_root() / "config" / f"{config_name}.yaml"
+    config_dir = (get_project_root() / "config").resolve()
+    config_path = (config_dir / f"{config_name}.yaml").resolve()
+    if not config_path.is_relative_to(config_dir):
+        raise ValueError(f"Invalid config name: {config_name!r}")
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     with open(config_path, "r", encoding="utf-8") as f:
@@ -100,7 +103,10 @@ def save_config(config_name: str, data: dict[str, Any]) -> None:
     """
     if not _CONFIG_NAME_PATTERN.fullmatch(config_name):
         raise ValueError(f"Invalid config name: {config_name!r}")
-    config_path = get_project_root() / "config" / f"{config_name}.yaml"
+    config_dir = (get_project_root() / "config").resolve()
+    config_path = (config_dir / f"{config_name}.yaml").resolve()
+    if not config_path.is_relative_to(config_dir):
+        raise ValueError(f"Invalid config name: {config_name!r}")
     # Create backup if file exists
     if config_path.exists():
         backup_path = config_path.with_suffix(".yaml.bak")

@@ -77,8 +77,12 @@ async def create_prompt(
     """Create a new prompt template."""
     try:
         return manager.create_prompt(req.model_dump(exclude_none=True))
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError:
+        logger.warning("Failed to create prompt", exc_info=True)
+        raise HTTPException(
+            status_code=409,
+            detail="Prompt could not be created (it may already exist)",
+        )
 
 
 @router.put("/{prompt_id}")

@@ -16,6 +16,8 @@ logger = get_logger("routes.sentiment")
 
 router = APIRouter(tags=["sentiment"])
 
+_GENERIC_ERROR_MESSAGE = "舆情分析服务暂时不可用，请稍后再试"
+
 
 @router.get("/resonance")
 async def get_resonance_events(
@@ -31,13 +33,13 @@ async def get_resonance_events(
     try:
         result = await asyncio.to_thread(svc.get_resonance_events, watchlist)
         return result
-    except Exception as exc:
-        logger.error("Resonance detection failed: %s", exc)
+    except Exception:
+        logger.exception("Resonance detection failed")
         return {
             "status": "error",
             "events": [],
             "total": 0,
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
         }
 
 
@@ -59,8 +61,8 @@ async def get_sentiment_report(
             watchlist=watchlist,
         )
         return result
-    except Exception as exc:
-        logger.error("Sentiment report failed: %s", exc)
+    except Exception:
+        logger.exception("Sentiment report failed")
         return {
             "status": "error",
             "core_trends": [],
@@ -69,7 +71,7 @@ async def get_sentiment_report(
             "risk_alerts": [],
             "sector_outlook": {},
             "overall_outlook": "舆情分析暂时不可用",
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
         }
 
 
@@ -90,13 +92,13 @@ async def get_market_pulse(
             watchlist=watchlist,
         )
         return result
-    except Exception as exc:
-        logger.error("Market pulse failed: %s", exc)
+    except Exception:
+        logger.exception("Market pulse failed")
         return {
             "status": "error",
             "hot_events": [],
             "holdings_news": {},
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
         }
 
 
@@ -112,11 +114,11 @@ async def get_cross_market_analysis(
     try:
         result = await asyncio.to_thread(svc.get_cross_market_analysis, symbol)
         return result
-    except Exception as exc:
-        logger.error("Cross-market analysis failed for %s: %s", symbol, exc)
+    except Exception:
+        logger.exception("Cross-market analysis failed for %s", symbol)
         return {
             "symbol": symbol,
             "combined_impact_score": 0.0,
             "impact_direction": "neutral",
-            "message": str(exc),
+            "message": _GENERIC_ERROR_MESSAGE,
         }

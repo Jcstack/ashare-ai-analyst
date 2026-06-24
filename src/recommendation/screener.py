@@ -13,7 +13,7 @@ import re
 import statistics
 import time
 from datetime import datetime, timedelta
-from math import ceil, exp
+from math import ceil, exp, isnan
 from typing import Any
 
 from src.recommendation.models import StockCandidate
@@ -987,6 +987,6 @@ def _safe_float(val: Any) -> float | None:
         return None
     try:
         f = float(val)
-        return f if f == f else None  # NaN check
+        return None if isnan(f) else f
     except (ValueError, TypeError):
         return None

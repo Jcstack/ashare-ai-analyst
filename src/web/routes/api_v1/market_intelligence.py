@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["market-intelligence"])
 
+_GENERIC_ERROR_MESSAGE = "Internal server error"
+
 
 @router.get("/signals")
 async def list_signals(
@@ -139,9 +141,9 @@ async def sector_rotation(
     try:
         result = detector.detect_rotation()
         return result
-    except Exception as exc:
-        logger.warning("Failed to detect sector rotation: %s", exc)
-        return {"error": str(exc), "sectors": []}
+    except Exception:
+        logger.exception("Failed to detect sector rotation")
+        return {"error": _GENERIC_ERROR_MESSAGE, "sectors": []}
 
 
 @router.get("/correlation")
@@ -164,9 +166,9 @@ async def correlation_matrix(
     try:
         matrix = service.compute_matrix(symbols_list, lookback_days)
         return matrix
-    except Exception as exc:
-        logger.warning("Failed to compute correlation matrix: %s", exc)
-        return {"error": str(exc), "matrix": {}}
+    except Exception:
+        logger.exception("Failed to compute correlation matrix")
+        return {"error": _GENERIC_ERROR_MESSAGE, "matrix": {}}
 
 
 @router.get("/macro-regime")
@@ -181,9 +183,9 @@ async def macro_regime(
     try:
         result = classifier.classify()
         return result
-    except Exception as exc:
-        logger.warning("Failed to classify macro regime: %s", exc)
-        return {"error": str(exc), "regime": "unknown"}
+    except Exception:
+        logger.exception("Failed to classify macro regime")
+        return {"error": _GENERIC_ERROR_MESSAGE, "regime": "unknown"}
 
 
 @router.get("/timeline")
@@ -219,9 +221,9 @@ async def signal_accuracy(
     try:
         result = store.get_signal_accuracy(signal_type, window_days)
         return result
-    except Exception as exc:
-        logger.warning("Failed to compute signal accuracy: %s", exc)
-        return {"error": str(exc), "accuracy": {}}
+    except Exception:
+        logger.exception("Failed to compute signal accuracy")
+        return {"error": _GENERIC_ERROR_MESSAGE, "accuracy": {}}
 
 
 @router.get("/signal-accuracy/history")
@@ -250,14 +252,14 @@ async def signal_accuracy_history(
             "granularity": granularity,
             "window_days": window_days,
         }
-    except Exception as exc:
-        logger.warning("Failed to compute signal accuracy history: %s", exc)
+    except Exception:
+        logger.exception("Failed to compute signal accuracy history")
         return {
             "data": [],
             "signal_type": signal_type or "ALL",
             "granularity": granularity,
             "window_days": window_days,
-            "error": str(exc),
+            "error": _GENERIC_ERROR_MESSAGE,
         }
 
 

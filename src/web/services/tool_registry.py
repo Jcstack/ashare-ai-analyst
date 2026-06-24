@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 import traceback
 from dataclasses import dataclass
@@ -3352,7 +3353,7 @@ def _handle_capital_flow(
                     rec = {}
                     for col in rows.columns:
                         val = row[col]
-                        if val is None or (isinstance(val, float) and val != val):
+                        if val is None or (isinstance(val, float) and math.isnan(val)):
                             rec[col] = 0
                         else:
                             rec[col] = val

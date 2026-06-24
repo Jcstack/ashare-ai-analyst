@@ -176,21 +176,23 @@ async def handle_chat(request: web.Request) -> web.Response:
     cmd.extend(
         [
             "--append-system-prompt",
-            "## MCP 工具使用优化\n"
-            "- 你的数据工具是 MCP 服务（get_realtime_snapshot, get_bayesian_analysis, "
-            "get_fund_flow, get_sentiment_data, get_market_overview, get_portfolio, "
-            "get_intraday_patterns, get_minute_bars, get_intraday_overview）\n"
-            "- 分析持仓股时，先调用 get_portfolio 获取持仓+实时盈亏（含现价/市值/盈亏金额/盈亏百分比），再逐股分析\n"
-            "- 盘中分析使用 get_intraday_patterns + get_minute_bars 获取分时数据\n"
-            "- 优先使用 get_realtime_snapshot 一次性获取行情+资金+成交\n"
-            "- 每种工具最多调用 1 次，避免重复调用\n"
-            "- 工具超时或失败时直接跳过，用已有数据完成分析\n"
-            "- 总工具调用控制在 5 次以内\n\n"
-            "## 数据来源铁律（不可违反）\n"
-            "- 股票价格/成交量/涨跌幅/资金流向 只能来自 MCP 工具或本地 fetcher\n"
-            "- 严禁使用 WebSearch/WebFetch 获取任何行情数据\n"
-            "- MCP 失败时用本地 fetcher 数据，本地也失败时停止分析，返回错误\n"
-            "- 违反此规则会导致用户基于错误数据做出交易决策，造成真实资金损失",
+            (
+                "## MCP 工具使用优化\n"
+                "- 你的数据工具是 MCP 服务（get_realtime_snapshot, get_bayesian_analysis, "
+                "get_fund_flow, get_sentiment_data, get_market_overview, get_portfolio, "
+                "get_intraday_patterns, get_minute_bars, get_intraday_overview）\n"
+                "- 分析持仓股时，先调用 get_portfolio 获取持仓+实时盈亏（含现价/市值/盈亏金额/盈亏百分比），再逐股分析\n"
+                "- 盘中分析使用 get_intraday_patterns + get_minute_bars 获取分时数据\n"
+                "- 优先使用 get_realtime_snapshot 一次性获取行情+资金+成交\n"
+                "- 每种工具最多调用 1 次，避免重复调用\n"
+                "- 工具超时或失败时直接跳过，用已有数据完成分析\n"
+                "- 总工具调用控制在 5 次以内\n\n"
+                "## 数据来源铁律（不可违反）\n"
+                "- 股票价格/成交量/涨跌幅/资金流向 只能来自 MCP 工具或本地 fetcher\n"
+                "- 严禁使用 WebSearch/WebFetch 获取任何行情数据\n"
+                "- MCP 失败时用本地 fetcher 数据，本地也失败时停止分析，返回错误\n"
+                "- 违反此规则会导致用户基于错误数据做出交易决策，造成真实资金损失"
+            ),
         ]
     )
 
@@ -207,19 +209,21 @@ async def handle_chat(request: web.Request) -> web.Response:
     cmd.extend(
         [
             "--allowedTools",
-            "Read,WebSearch,WebFetch,"
-            "mcp__ashare-research__get_realtime_snapshot,"
-            "mcp__ashare-research__get_bayesian_analysis,"
-            "mcp__ashare-research__get_fund_flow,"
-            "mcp__ashare-research__get_sentiment_data,"
-            "mcp__ashare-research__get_market_overview,"
-            "mcp__ashare-research__get_recommendations,"
-            "mcp__ashare-research__get_portfolio,"
-            "mcp__ashare-research__get_intraday_patterns,"
-            "mcp__ashare-research__get_minute_bars,"
-            "mcp__ashare-research__get_intraday_overview,"
-            "mcp__ashare-research__get_data_health,"
-            "mcp__ashare-research__push_message_to_user",
+            (
+                "Read,WebSearch,WebFetch,"
+                "mcp__ashare-research__get_realtime_snapshot,"
+                "mcp__ashare-research__get_bayesian_analysis,"
+                "mcp__ashare-research__get_fund_flow,"
+                "mcp__ashare-research__get_sentiment_data,"
+                "mcp__ashare-research__get_market_overview,"
+                "mcp__ashare-research__get_recommendations,"
+                "mcp__ashare-research__get_portfolio,"
+                "mcp__ashare-research__get_intraday_patterns,"
+                "mcp__ashare-research__get_minute_bars,"
+                "mcp__ashare-research__get_intraday_overview,"
+                "mcp__ashare-research__get_data_health,"
+                "mcp__ashare-research__push_message_to_user"
+            ),
         ]
     )
 
