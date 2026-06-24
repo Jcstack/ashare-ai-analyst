@@ -34,33 +34,49 @@ An LLM-powered intelligent analysis platform for the A-share (Chinese stock) mar
 
 | 模块 | 说明 | Module | Description |
 |------|------|--------|-------------|
-| 📊 市场数据 | AKShare / adata 行情采集，自动缓存 | Market Data | AKShare / adata quote collection with caching |
-| 🔍 技术分析 | MA、MACD、RSI、KDJ、布林带、K线形态识别 | Technical Analysis | MA, MACD, RSI, KDJ, Bollinger Bands, candlestick pattern recognition |
-| 🤖 多模型 AI | Claude / Gemini / OpenAI 多模型路由与共识分析 | Multi-LLM | Claude / Gemini / OpenAI routing and consensus analysis |
-| 🧠 自主 Agent | OODA 循环驱动的投资逻辑追踪与决策流水线（仅模拟） | Autonomous Agent | OODA-loop driven thesis tracking & decision pipeline (simulation only) |
-| 🌐 全球情报 | 全球指数/大宗商品/汇率/跨市场关联分析 | Global Intel | Global indices / commodities / FX / cross-market correlation |
-| 📰 新闻情报 | RSS + 关键词匹配 + LLM 情绪评分 | News Intel | RSS + keyword matching + LLM sentiment scoring |
-| 📈 量化回测 | backtrader 策略回测，Qlib 可选集成 | Backtesting | backtrader strategy backtesting, optional Qlib integration |
-| 📱 Discord Bot | 自动推送分析报告到 Discord 频道 | Discord Bot | Auto-push analysis reports to Discord channels |
-| 🖥️ Web UI | FastAPI + React 19 + TypeScript 前端控制台 | Web UI | FastAPI + React 19 + TypeScript dashboard |
-| ⚙️ 自动化调度 | Celery + Redis 定时任务（如收盘后自动分析） | Automation | Celery + Redis scheduled tasks (e.g., post-market auto-analysis) |
+| 🧠 自主 Agent 循环 | OODA 循环：信号聚合 → 贝叶斯预筛 → 多空辩论 → 风险闸门 → Kelly 仓位（**仅模拟**） | Autonomous Agent Loop | OODA cycle: signal aggregation → Bayesian prescreen → bull/bear debate → risk gates → Kelly sizing (**simulation only**) |
+| 📡 市场情报管线 | 5 层信源 + 7 维评分 + 因果影响链 + NetworkX 知识图谱 | Market Intelligence | 5-layer sources + 7-dimension scoring + causal impact chains + NetworkX knowledge graph |
+| 🎯 智能选股 | 多风格量化筛选 + LLM 复核 + T+1 隔夜风险 + 胜率追踪 | Smart Stock Picks | Multi-style screener + LLM review + T+1 overnight risk + win-rate tracking |
+| 📊 市场状态识别 | HMM 三态（牛 / 熊 / 震荡）+ 情绪周期闸门 | Regime Detection | 3-state HMM (bull / bear / consolidation) + sentiment-cycle gating |
+| 🤖 多模型 AI | Claude / Gemini / OpenAI / DeepSeek 路由 + 共识投票 | Multi-LLM | Claude / Gemini / OpenAI / DeepSeek routing + consensus voting |
+| 🌊 事件总线 | Redis Streams 事件驱动微 OODA（行情 / 新闻 / 情绪 / 信号） | Event Bus | Redis-Streams event-driven micro-OODA (market / news / sentiment / signal) |
+| 🛡️ 风险引擎 | 熔断器 + Kelly 仓位 + VaR + A股约束（T+1 / 涨跌停 / 100 股） | Risk Engine | circuit breaker + Kelly sizing + VaR + A-share constraints (T+1 / price limits / 100-share lots) |
+| 🌐 全球情报 + 新闻 | 全球指数 / 大宗 / 汇率关联 + AI 新闻聚合 | Global Intel + News | global indices / commodities / FX correlation + AI news aggregation |
+| 📈 量化回测 | backtrader 策略回测，可选 Qlib Alpha158 | Backtesting | backtrader strategy backtesting, optional Qlib Alpha158 |
+| 📱 Discord | 交易信号 / 情报自动推送到 Discord | Discord | auto-push trade signals / intel to Discord |
+| 🖥️ Web UI | FastAPI + React 19：ControlTower / Portfolio / Recommendations / Review | Web UI | FastAPI + React 19: ControlTower / Portfolio / Recommendations / Review |
+| ⚙️ 自动化调度 | Celery 45+ 定时任务 + 常驻 agent 守护进程 | Automation | Celery beat (45+ tasks) + always-on agent daemon |
 
 ---
 
 ## 架构 · Architecture
 
-```
-数据层 (Data)          分析层 (Analysis)        预测层 (Prediction)      策略层 (Strategy)
-src/data/         →   src/analysis/         →   src/prediction/      →   src/strategy/
-AKShare/adata         技术指标 / 形态识别         LLM 多模型引擎              + src/backtest/
-Config-driven         Indicators / Patterns      Claude/Gemini/OpenAI        A股规则约束
+v2 架构以「自主 Agent OODA 循环」为中心，由三路信号来源驱动，下游接风险闸门与（模拟）执行：
 
-                    横切关注点 / Cross-cutting
-          ┌─────────────────────────────────────────────────┐
-          │  OpenClaw (openclaw/)  ·  Celery 自动化调度       │
-          │  src/web/ FastAPI      ·  frontend/ React SPA    │
-          │  src/agents/ 自主智能体  ·  Discord Bot           │
-          └─────────────────────────────────────────────────┘
+```
+数据层 / Data  (src/data/)
+AKShare · EastMoney push2 · QMT · 多源健康路由回退
+      │  行情 / OHLCV / 资金流 / 交易日历
+      ▼
+┌──────────────────────── 信号来源 / Signal Sources ────────────────────────┐
+│  市场情报 Intelligence      量化 Quant             智能选股 Recommendation   │
+│  src/intelligence(_hub)/    src/quant/             src/recommendation/      │
+│  5层信源·7维评分·因果链·知识图谱  HMM状态·Alpha·信号库    多风格筛选·LLM复核·T+1风险 │
+└─────────────────────────────────────┬──────────────────────────────────────┘
+      │  signals
+      ▼
+自主 Agent 循环 / Agent OODA Loop  (src/agent_loop/)
+SignalAggregator → DecisionPipeline（贝叶斯预筛 · 多空辩论 · 风险闸门 · Kelly 仓位）
+InvestmentDirector（7 团队）· 情绪周期闸门 · ThesisTracker · OutcomeTracker → 置信度校准
+      │  TradeProposal  （⚠️ 仅模拟 / simulation only）
+      ▼
+风险 & 执行 / Risk & Execution               事件总线 / Event Bus
+src/risk/ 熔断·Kelly·VaR                     src/event_bus/ Redis Streams
+src/trading/ 执行闸门·KillSwitch·A股约束        7 streams → 微 OODA（行情/新闻/情绪/信号）
+
+横切 / Cross-cutting:
+src/llm/ 多模型网关（Claude/Gemini/OpenAI/DeepSeek + 共识投票）
+src/web/ FastAPI  ·  frontend/ React SPA  ·  src/discord_bot/  ·  openclaw/ Celery + 常驻 daemon
 ```
 
 ---
@@ -69,14 +85,15 @@ Config-driven         Indicators / Patterns      Claude/Gemini/OpenAI        A�
 
 | 层 / Layer | 技术 / Technologies |
 |-----------|-------------------|
-| 数据 / Data | AKShare, adata, pandas, numpy, yfinance |
-| 分析 / Analysis | ta (technical indicators), plotly |
-| AI 预测 / AI | Anthropic Claude, Google Gemini, OpenAI |
+| 数据 / Data | AKShare, adata, EastMoney push2 (curl_cffi), QMT/XtQuant (optional), pandas, numpy, pyarrow, yfinance |
+| 分析 / Analysis | ta (technical indicators), plotly, matplotlib |
+| AI 预测 / AI | Anthropic Claude, Google Gemini, OpenAI, DeepSeek, Claude Code bridge (fallback) |
+| 量化 & Agent / Quant | hmmlearn (HMM 市场状态), networkx (知识图谱), scikit-learn, Qlib Alpha158 (optional) |
 | 策略回测 / Backtest | backtrader, Qlib (optional) |
-| 后端 / Backend | FastAPI, uvicorn, Redis, Celery |
-| 前端 / Frontend | React 19, TypeScript, Vite, shadcn/ui, Tailwind CSS 4 |
+| 后端 / Backend | FastAPI, uvicorn, Redis (cache + Streams 事件总线), Celery + Beat |
+| 前端 / Frontend | React 19, TypeScript, Vite, shadcn/ui, Tailwind CSS 4, React Query |
 | 通知 / Notification | Discord (bot + webhook) |
-| 基础设施 / Infra | Docker Compose, nginx |
+| 基础设施 / Infra | Docker Compose, nginx, searxng (self-host search, optional) |
 
 ---
 
@@ -133,8 +150,8 @@ pip install -r requirements.txt
 .venv/bin/ruff check src/ tests/
 .venv/bin/ruff format --check src/ tests/
 
-# 单元测试 / Tests
-.venv/bin/pytest tests/ -v
+# 单元测试 / Unit tests (external deps mocked; this is what CI runs)
+.venv/bin/pytest tests/unit -q
 
 # 前端 / Frontend
 cd frontend
@@ -151,12 +168,13 @@ npm run dev        # 开发模式 / Dev mode
 | 文件 / File | 用途 / Purpose |
 |------------|---------------|
 | `config/stocks.yaml` | 股票自选池 / Stock watchlist |
-| `config/llm.yaml` | LLM 模型路由 / LLM model routing |
-| `config/openclaw.yaml` | 定时任务 / Scheduled tasks |
-| `config/agent.yaml` | Agent 参数 / Agent parameters |
-| `config/analysis.yaml` | 技术指标参数 / Technical indicator params |
-| `config/risk.yaml` | 风险引擎参数 / Risk engine params |
-| `.env` | API Keys 与密钥（不提交！）/ API keys (never commit!) |
+| `config/llm.yaml` | LLM 模型路由（调用方→模型映射）/ LLM model routing (caller→model) |
+| `config/agent.yaml` · `config/trading_loop.yaml` | Agent / OODA 循环参数 / Agent & OODA-loop params |
+| `config/recommendation.yaml` | 智能选股风格/过滤/权重 / Screener styles, filters, weights |
+| `config/intelligence_hub.yaml` · `config/event_bus.yaml` | 情报信源 / 事件总线 / Intel sources & event bus |
+| `config/risk.yaml` · `config/trading_constraints.yaml` · `config/broker.yaml` | 风险 / A股约束 / 券商 / Risk, A-share constraints, broker |
+| `config/openclaw.yaml` | Celery beat 定时任务 / Celery beat schedule |
+| `.env` | API Keys 与密钥（**不提交**！）/ API keys (**never commit**!) |
 
 ---
 
@@ -165,21 +183,28 @@ npm run dev        # 开发模式 / Dev mode
 ```
 .
 ├── src/
-│   ├── data/            # 数据采集 / Data collection
-│   ├── analysis/        # 技术分析 / Technical analysis
-│   ├── prediction/      # LLM 预测 / LLM prediction
-│   ├── strategy/        # 策略 / Strategy
-│   ├── backtest/        # 回测 / Backtesting
-│   ├── agents/          # 自主 Agent / Autonomous agents
-│   ├── llm/             # 多模型网关 / Multi-LLM gateway
-│   ├── web/             # FastAPI 后端 / FastAPI backend
-│   ├── discord_bot/     # Discord 机器人 / Discord bot
-│   └── ...
-├── frontend/            # React 前端 / React frontend
-├── openclaw/            # Celery 任务调度 / Task automation
-├── config/              # YAML 配置文件 / YAML config files
-├── tests/               # 测试 / Tests
-├── docs/                # 文档 / Documentation
+│   ├── data/              # 多源行情采集 / Multi-source market data (AKShare·EastMoney·QMT)
+│   ├── intelligence/      # 市场情报：因果链·辩论·知识图谱 / Causal chains, debate, knowledge graph
+│   ├── intelligence_hub/  # 信源聚合·7维评分·存储 / Source aggregation, scoring, store
+│   ├── agent_loop/        # 自主 OODA 决策循环 (+ daemon/) / Autonomous OODA loop
+│   ├── quant/             # HMM 状态·Alpha·信号库 / HMM regime, alpha, signal library
+│   ├── recommendation/    # 智能选股引擎 / Smart stock screener + LLM review
+│   ├── trading/           # 执行闸门·A股约束·KillSwitch / Execution gates, constraints
+│   ├── risk/              # 熔断·Kelly 仓位·VaR / Circuit breaker, sizing, VaR
+│   ├── event_bus/         # Redis Streams 事件总线 / Event bus
+│   ├── prediction/        # LLM 分析与预测 / LLM analysis & prediction
+│   ├── analysis/          # 技术指标·情绪 / Technical indicators, sentiment
+│   ├── llm/               # 多模型网关 / Multi-LLM gateway + router
+│   ├── web/               # FastAPI 后端 / FastAPI backend
+│   ├── discord_bot/       # Discord 机器人 / Discord bot
+│   └── strategy/ backtest/ market_intelligence/ audit/ …
+├── frontend/              # React 19 SPA (ControlTower / Portfolio / Recommendations / Review …)
+├── openclaw/              # Celery 任务 + 常驻 daemon / Celery tasks (45+) + always-on daemon
+├── config/                # YAML 配置文件 / YAML config files
+├── mcp_server/            # MCP 数据桥 / MCP data bridge
+├── research/              # 研究工作站 / Research workstation
+├── tests/                 # 测试 / Tests
+├── docs/                  # 文档 / Documentation
 ├── docker-compose.yaml
 └── .env.example
 ```
