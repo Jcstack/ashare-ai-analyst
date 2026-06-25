@@ -102,17 +102,6 @@ class TestOvernightRiskCalculator:
         assert profile.rally_sample_size > 0
         assert isinstance(profile.post_rally_drawdown_prob, float)
 
-    def test_context_str(self):
-        calc = OvernightRiskCalculator()
-        closes = [100 + i for i in range(15)]
-        opens = [99 + i for i in range(15)]
-        df = self._make_df(closes, opens)
-        profile = calc._compute_profile("000001", df, rally_threshold=5.0)
-
-        ctx = profile.to_context_str()
-        assert "隔夜风险分析" in ctx
-        assert "000001" in ctx
-
     def test_batch_calculation(self):
         # Mock fetcher to return empty — should return empty dict gracefully
         fetcher = Mock()

@@ -58,8 +58,10 @@ class ConfidenceCalibrator:
 
         Adjustments applied in order:
         1. Historical accuracy-based adjustment (per-action)
-        2. Per-sector accuracy adjustment
-        3. Regime-based adjustment
+        2. Regime-based adjustment
+
+        ``sector`` is accepted but not yet used — per-sector calibration needs
+        sector metadata on the decisions table, which does not exist yet.
         """
         adjustment = 0.0
 
@@ -67,12 +69,7 @@ class ConfidenceCalibrator:
         action_adj = self._action_calibration(action)
         adjustment += action_adj
 
-        # 2. Sector-level calibration
-        if sector:
-            sector_adj = self._sector_calibration(sector)
-            adjustment += sector_adj
-
-        # 3. Regime adjustment
+        # 2. Regime adjustment
         regime_adj = self._regime_adjustment(regime, action)
         adjustment += regime_adj
 
@@ -83,13 +80,12 @@ class ConfidenceCalibrator:
 
         if abs(adjustment) > 0.01:
             logger.debug(
-                "Calibration %s %s: %.2f → %.2f (action=%.3f sector=%.3f regime=%.3f)",
+                "Calibration %s %s: %.2f → %.2f (action=%.3f regime=%.3f)",
                 action,
                 symbol,
                 raw_confidence,
                 calibrated,
                 action_adj,
-                sector_adj if sector else 0.0,
                 regime_adj,
             )
 
@@ -262,12 +258,6 @@ class ConfidenceCalibrator:
 
         finally:
             conn.close()
-
-    def _sector_calibration(self, sector: str) -> float:
-        """Compute confidence adjustment based on sector-level accuracy."""
-        # Sector tracking would require joining decisions with thesis/symbol metadata.
-        # For now, return 0 — will be enhanced when we add sector to decisions table.
-        return 0.0
 
     def _regime_adjustment(self, regime: str, action: str) -> float:
         """Apply regime-based confidence adjustment."""
