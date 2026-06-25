@@ -69,14 +69,25 @@ class TestReviewAgentFallback:
         assert recs[0].ai_analyzed is False
 
     def test_fallback_filters_low_score(self, agent: ReviewAgent) -> None:
-        """Fallback should skip candidates with score < 0.65."""
+        """Fallback keeps watch-grade candidates (score >= WATCH_SCORE_THRESHOLD).
+
+        The no-LLM fallback uses the more lenient WATCH threshold (0.55), not the
+        BUY threshold (0.65) — exercise the exact boundary so the two stay distinct.
+        """
+        from src.recommendation.review_agent import WATCH_SCORE_THRESHOLD
+
         candidates = [
             _make_candidate(score=0.85),
-            _make_candidate(symbol="000001", name="低分股", score=0.5),
+            _make_candidate(
+                symbol="600000", name="边界股", score=WATCH_SCORE_THRESHOLD
+            ),
+            _make_candidate(symbol="000001", name="低分股", score=0.54),
         ]
         recs = agent.review_candidates(candidates, "value", "mid")
-        assert len(recs) == 1
-        assert recs[0].score == 0.85
+        kept = {r.symbol for r in recs}
+        # 0.55 (== WATCH) kept, 0.54 (< WATCH) dropped.
+        assert kept == {"600519", "600000"}
+        assert "000001" not in kept
 
     def test_empty_candidates(self, agent: ReviewAgent) -> None:
         """Empty candidates returns empty list."""

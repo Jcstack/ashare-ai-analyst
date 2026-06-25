@@ -110,19 +110,48 @@ class TestCache:
         with patch("src.intelligence_hub.symbol_extractor._CACHE_PATH", cache_file):
             assert SymbolExtractor._load_cache() is None
 
-    def test_akshare_failure_uses_cache(self, tmp_path: Path) -> None:
-        """When akshare fails, extractor falls back to cached names."""
+    def _seed_cache(self, tmp_path: Path) -> Path:
         cache_file = tmp_path / "stock_names_cache.json"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(
             json.dumps({"002594": "比亚迪"}, ensure_ascii=False),
             encoding="utf-8",
         )
+        return cache_file
 
-        with patch("src.intelligence_hub.symbol_extractor._CACHE_PATH", cache_file):
+    def test_akshare_exception_uses_cache(self, tmp_path: Path) -> None:
+        """When the akshare call raises, fall back to cached names.
+
+        The data source is mocked to raise so the test is deterministic and
+        never touches the network (it previously relied on a real call failing,
+        which made CI flaky when the source timed out instead of raising).
+        """
+        cache_file = self._seed_cache(tmp_path)
+        with (
+            patch("src.intelligence_hub.symbol_extractor._CACHE_PATH", cache_file),
+            patch(
+                "src.data.eastmoney_proxy.em_api_call",
+                side_effect=ConnectionError("no network in test"),
+            ),
+        ):
             ext = SymbolExtractor(load_akshare=True)
-            # akshare will fail in test env (not installed or no network)
-            # — should fall back to cache
+            codes = ext.extract("比亚迪新能源汽车销量创新高")
+            assert "002594" in codes
+
+    def test_akshare_empty_result_uses_cache(self, tmp_path: Path) -> None:
+        """A degraded source that returns an empty result (no exception) must
+        still fall back to the cache — regression for the silent-empty path."""
+        import pandas as pd
+
+        cache_file = self._seed_cache(tmp_path)
+        with (
+            patch("src.intelligence_hub.symbol_extractor._CACHE_PATH", cache_file),
+            patch(
+                "src.data.eastmoney_proxy.em_api_call",
+                return_value=pd.DataFrame(),
+            ),
+        ):
+            ext = SymbolExtractor(load_akshare=True)
             codes = ext.extract("比亚迪新能源汽车销量创新高")
             assert "002594" in codes
 
