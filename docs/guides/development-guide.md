@@ -42,7 +42,7 @@ See @requirements.txt for Python dependencies and @frontend/package.json for fro
 |-------|-----------------|
 | Data | AKShare, adata, EastMoney push2 (curl_cffi), XtQuant (QMT), pandas, numpy, pyarrow, Qlib (optional) |
 | Intelligence | NetworkX (knowledge graph), feedparser, ddgs/searxng |
-| Quant / Agent | hmmlearn (HMM regime), scikit-learn, Qlib Alpha158 (optional) |
+| Quant / Agent | hmmlearn (HMM regime), scikit-learn, Qlib custom alpha factors (optional) |
 | Prediction / LLM | Anthropic Claude, Google Gemini, OpenAI, DeepSeek, Claude Code bridge |
 | Strategy | backtrader |
 | Web Backend | FastAPI, uvicorn, Redis (cache + Streams event bus) |

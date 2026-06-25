@@ -42,7 +42,7 @@ An LLM-powered intelligent analysis platform for the A-share (Chinese stock) mar
 | 🌊 事件总线 | Redis Streams 事件驱动微 OODA（行情 / 新闻 / 情绪 / 信号） | Event Bus | Redis-Streams event-driven micro-OODA (market / news / sentiment / signal) |
 | 🛡️ 风险引擎 | 熔断器 + Kelly 仓位 + VaR + A股约束（T+1 / 涨跌停 / 100 股） | Risk Engine | circuit breaker + Kelly sizing + VaR + A-share constraints (T+1 / price limits / 100-share lots) |
 | 🌐 全球情报 + 新闻 | 全球指数 / 大宗 / 汇率关联 + AI 新闻聚合 | Global Intel + News | global indices / commodities / FX correlation + AI news aggregation |
-| 📈 量化回测 | backtrader 策略回测，可选 Qlib Alpha158 | Backtesting | backtrader strategy backtesting, optional Qlib Alpha158 |
+| 📈 量化回测 | backtrader 策略回测，可选 Qlib 自定义 alpha 因子 | Backtesting | backtrader strategy backtesting, optional Qlib custom alpha factors |
 | 📱 Discord | 交易信号 / 情报自动推送到 Discord | Discord | auto-push trade signals / intel to Discord |
 | 🖥️ Web UI | FastAPI + React 19：ControlTower / Portfolio / Recommendations / Review | Web UI | FastAPI + React 19: ControlTower / Portfolio / Recommendations / Review |
 | ⚙️ 自动化调度 | Celery 45+ 定时任务 + 常驻 agent 守护进程 | Automation | Celery beat (45+ tasks) + always-on agent daemon |
@@ -88,7 +88,7 @@ src/web/ FastAPI  ·  frontend/ React SPA  ·  src/discord_bot/  ·  openclaw/ C
 | 数据 / Data | AKShare, adata, EastMoney push2 (curl_cffi), QMT/XtQuant (optional), pandas, numpy, pyarrow, yfinance |
 | 分析 / Analysis | ta (technical indicators), plotly, matplotlib |
 | AI 预测 / AI | Anthropic Claude, Google Gemini, OpenAI, DeepSeek, Claude Code bridge (fallback) |
-| 量化 & Agent / Quant | hmmlearn (HMM 市场状态), networkx (知识图谱), scikit-learn, Qlib Alpha158 (optional) |
+| 量化 & Agent / Quant | hmmlearn (HMM 市场状态), networkx (知识图谱), scikit-learn, Qlib custom alpha factors (optional) |
 | 策略回测 / Backtest | backtrader, Qlib (optional) |
 | 后端 / Backend | FastAPI, uvicorn, Redis (cache + Streams 事件总线), Celery + Beat |
 | 前端 / Frontend | React 19, TypeScript, Vite, shadcn/ui, Tailwind CSS 4, React Query |
