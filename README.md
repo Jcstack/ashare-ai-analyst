@@ -214,6 +214,7 @@ npm run dev        # 开发模式 / Dev mode
 ## 文档 · Documentation
 
 - [`docs/`](docs/README.md) — documentation index
+- [`docs/how-it-works.md`](docs/how-it-works.md) — **how the agent works + what the backtest taught us** (newcomer overview)
 - [`docs/guides/development-guide.md`](docs/guides/development-guide.md) — architecture, tech stack, data flow (**start here**)
 - [`docs/guides/runbook.md`](docs/guides/runbook.md) — local setup & run
 - [`docs/backtest-v2-results.md`](docs/backtest-v2-results.md) — **honest out-of-sample backtest of the v2 stack** (spoiler: no demonstrated alpha vs buy-and-hold)
