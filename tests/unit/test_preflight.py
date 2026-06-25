@@ -5,6 +5,8 @@ Part of v19.0 Production Hardening — Phase 1.1.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -269,6 +271,117 @@ class TestOrderAmountLimit:
             )
         amt_check = next(c for c in result.checks if c["name"] == "order_amount")
         assert amt_check["passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tests — circuit breaker gate reads persisted halt state (regression: P0.1)
+# ---------------------------------------------------------------------------
+
+
+def _patch_hours_pass():
+    return patch(
+        "src.trading.preflight.PreflightRiskCheck._check_trading_hours",
+        return_value={"name": "trading_hours", "passed": True, "reason": ""},
+    )
+
+
+class TestCircuitBreakerGate:
+    def test_halted_breaker_blocks_order(self, preflight: PreflightRiskCheck):
+        """A persisted halt (is_halted() True) must fail the preflight gate.
+
+        Regression for the bug where _check_circuit_breaker only read a fresh
+        instance's in-memory state (always NORMAL) and never loaded Redis.
+        """
+        with (
+            _patch_hours_pass(),
+            _patch_constraints_pass(),
+            patch("src.risk.circuit_breaker.CircuitBreaker") as MockBreaker,
+        ):
+            instance = MockBreaker.return_value
+            instance.is_halted.return_value = True
+            instance.state.value = "daily_halt"
+            result = preflight.check(
+                symbol="600498", action="buy", shares=100, price=25.0
+            )
+        cb = next(c for c in result.checks if c["name"] == "circuit_breaker")
+        assert cb["passed"] is False
+        assert "daily_halt" in cb["reason"]
+        assert result.passed is False
+        instance.is_halted.assert_called_once()
+
+    def test_normal_breaker_passes(self, preflight: PreflightRiskCheck):
+        with (
+            _patch_hours_pass(),
+            _patch_constraints_pass(),
+            patch("src.risk.circuit_breaker.CircuitBreaker") as MockBreaker,
+        ):
+            MockBreaker.return_value.is_halted.return_value = False
+            result = preflight.check(
+                symbol="600498", action="sell", shares=100, price=25.0
+            )
+        cb = next(c for c in result.checks if c["name"] == "circuit_breaker")
+        assert cb["passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tests — T+1 sellability (regression: P0.2 — advertised but never run)
+# ---------------------------------------------------------------------------
+
+
+class TestT1Sellability:
+    def test_sell_bought_today_blocks(self, preflight: PreflightRiskCheck):
+        hours_p, breaker_p = _patch_market_open()
+        constraints_p = _patch_constraints_pass()
+        with hours_p, breaker_p, constraints_p:
+            result = preflight.check(
+                symbol="600498",
+                action="sell",
+                shares=100,
+                price=25.0,
+                buy_date=date.today(),
+            )
+        t1 = next(c for c in result.checks if c["name"] == "t1_sellability")
+        assert t1["passed"] is False
+        assert "T+1" in t1["reason"]
+        assert result.passed is False
+
+    def test_sell_bought_earlier_passes(self, preflight: PreflightRiskCheck):
+        hours_p, breaker_p = _patch_market_open()
+        constraints_p = _patch_constraints_pass()
+        with hours_p, breaker_p, constraints_p:
+            result = preflight.check(
+                symbol="600498",
+                action="sell",
+                shares=100,
+                price=25.0,
+                buy_date=date.today() - timedelta(days=1),
+            )
+        t1 = next(c for c in result.checks if c["name"] == "t1_sellability")
+        assert t1["passed"] is True
+
+    def test_no_buy_date_skips_enforcement(self, preflight: PreflightRiskCheck):
+        hours_p, breaker_p = _patch_market_open()
+        constraints_p = _patch_constraints_pass()
+        with hours_p, breaker_p, constraints_p:
+            result = preflight.check(
+                symbol="600498", action="sell", shares=100, price=25.0
+            )
+        t1 = next(c for c in result.checks if c["name"] == "t1_sellability")
+        assert t1["passed"] is True
+
+    def test_t1_not_run_for_buy(self, preflight: PreflightRiskCheck):
+        hours_p, breaker_p = _patch_market_open()
+        constraints_p = _patch_constraints_pass()
+        with hours_p, breaker_p, constraints_p:
+            result = preflight.check(
+                symbol="600498",
+                action="buy",
+                shares=100,
+                price=25.0,
+                buy_date=date.today(),
+            )
+        t1_checks = [c for c in result.checks if c["name"] == "t1_sellability"]
+        assert len(t1_checks) == 0
 
 
 # ---------------------------------------------------------------------------

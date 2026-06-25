@@ -17,6 +17,13 @@ from src.recommendation.models import Recommendation, StockCandidate
 
 logger = logging.getLogger(__name__)
 
+# Score thresholds (intentionally distinct, not a bug):
+#   - LLM-reviewed path keeps only buy-grade candidates (>= BUY).
+#   - The no-LLM fallback is more lenient and keeps watch-grade candidates
+#     (>= WATCH) since it has no model to assign a finer action.
+BUY_SCORE_THRESHOLD = 0.65
+WATCH_SCORE_THRESHOLD = 0.55
+
 _STYLE_PROMPTS: dict[str, str] = {
     "value": (
         "你是一位拥有20年经验的价值投资分析师，专精A股市场基本面研究。\n\n"
@@ -520,9 +527,10 @@ class ReviewAgent:
                 else:
                     score_parts.append(f"{sym}={fs}")
             logger.info(
-                "LLM review scores: style=%s, %s (threshold=0.65)",
+                "LLM review scores: style=%s, %s (buy threshold=%.2f)",
                 style,
                 ", ".join(score_parts),
+                BUY_SCORE_THRESHOLD,
             )
 
         # Map candidates by symbol for lookup
@@ -534,8 +542,8 @@ class ReviewAgent:
             symbol = item.get("symbol", "")
             final_score = float(item.get("final_score", 0))
 
-            # Only keep candidates with score >= 0.65
-            if final_score < 0.65:
+            # Only keep buy-grade candidates (score >= BUY_SCORE_THRESHOLD)
+            if final_score < BUY_SCORE_THRESHOLD:
                 continue
 
             candidate = candidate_map.get(symbol)
@@ -549,7 +557,7 @@ class ReviewAgent:
             elif final_score >= 0.8:
                 confidence = "high"
             else:
-                # final_score >= 0.65 is guaranteed by the earlier filter above.
+                # final_score >= BUY_SCORE_THRESHOLD is guaranteed above.
                 confidence = "medium"
 
             # Read action from LLM output; default to "buy" for backward compat
@@ -606,7 +614,7 @@ class ReviewAgent:
         results: list[Recommendation] = []
 
         for c in candidates:
-            if c.score < 0.55:
+            if c.score < WATCH_SCORE_THRESHOLD:
                 continue
             confidence = "high" if c.score >= 0.8 else "medium"
             results.append(

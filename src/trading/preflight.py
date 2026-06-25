@@ -10,6 +10,7 @@ No new risk logic — this module is pure aggregation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from src.utils.logger import get_logger
@@ -36,7 +37,8 @@ class PreflightRiskCheck:
     """Aggregated pre-execution validation.
 
     Combines: kill switch, trading hours, circuit breaker, available
-    cash, trading constraints, T+1 sellability, order amount limit.
+    cash, trading constraints, T+1 sellability (when ``buy_date`` is
+    supplied), order amount limit.
 
     Args:
         kill_switch: :class:`KillSwitch` instance.
@@ -60,6 +62,7 @@ class PreflightRiskCheck:
         action: str,
         shares: int,
         price: float,
+        buy_date: str | date | None = None,
     ) -> PreflightResult:
         """Run all preflight checks.
 
@@ -68,6 +71,10 @@ class PreflightRiskCheck:
             action: "buy", "sell", "add", or "reduce".
             shares: Number of shares.
             price: Proposed order price.
+            buy_date: Date the position being sold/reduced was opened. When
+                supplied for a "sell"/"reduce" action, T+1 settlement is
+                enforced (a position bought today cannot be sold today). When
+                omitted, the T+1 check passes (caller must supply it to bind).
 
         Returns:
             :class:`PreflightResult` with per-check details.
@@ -80,6 +87,9 @@ class PreflightRiskCheck:
 
         if action in ("buy", "add"):
             checks.append(self._check_available_cash(shares, price))
+
+        if action in ("sell", "reduce"):
+            checks.append(self._check_t1_sellability(buy_date))
 
         checks.append(self._check_constraints(symbol))
         checks.append(self._check_lot_size(shares))
@@ -134,21 +144,49 @@ class PreflightRiskCheck:
 
     def _check_circuit_breaker(self) -> dict[str, Any]:
         try:
-            from src.risk.circuit_breaker import BreakerState, CircuitBreaker
+            from src.risk.circuit_breaker import CircuitBreaker
 
             breaker = CircuitBreaker()
-            # Quick state check — if not NORMAL, trading is halted
-            if breaker._state != BreakerState.NORMAL:
+            # is_halted() loads the persisted state from Redis and honors any
+            # active cooldown — a fresh instance's in-memory state is always
+            # NORMAL, so this load is what makes the gate actually enforce halts.
+            if breaker.is_halted():
                 return {
                     "name": "circuit_breaker",
                     "passed": False,
-                    "reason": f"Circuit breaker in {breaker._state.value} state",
+                    "reason": f"Circuit breaker in {breaker.state.value} state",
                 }
             return {"name": "circuit_breaker", "passed": True, "reason": ""}
         except Exception as exc:
             # If circuit breaker unavailable, allow (don't block on import failure)
             logger.debug("Circuit breaker check skipped: %s", exc)
             return {"name": "circuit_breaker", "passed": True, "reason": ""}
+
+    def _check_t1_sellability(self, buy_date: str | date | None) -> dict[str, Any]:
+        """T+1 settlement: a position bought today cannot be sold today.
+
+        Enforced only when ``buy_date`` is known; without it the check passes
+        (the caller is responsible for supplying ``buy_date`` to make T+1 bind).
+        """
+        if buy_date is None:
+            return {"name": "t1_sellability", "passed": True, "reason": ""}
+        try:
+            from src.trading.constraints import TradingConstraintsEngine
+
+            engine = TradingConstraintsEngine()
+            if not engine.can_sell_today(buy_date):
+                return {
+                    "name": "t1_sellability",
+                    "passed": False,
+                    "reason": (
+                        f"T+1 settlement: position opened {buy_date} "
+                        "cannot be sold today"
+                    ),
+                }
+            return {"name": "t1_sellability", "passed": True, "reason": ""}
+        except Exception as exc:
+            logger.debug("T+1 sellability check skipped: %s", exc)
+            return {"name": "t1_sellability", "passed": True, "reason": ""}
 
     def _check_available_cash(self, shares: int, price: float) -> dict[str, Any]:
         order_amount = shares * price
