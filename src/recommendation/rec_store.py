@@ -693,38 +693,6 @@ class RecStore:
         finally:
             conn.close()
 
-    def get_sector_win_rates(self, days: int = 30) -> dict[str, dict[str, Any]]:
-        """Get per-sector win rates for intel chain feedback.
-
-        Returns dict like: {"银行": {"win_rate_t1": 0.7, "count": 10}}
-        """
-        conn = self._connect()
-        try:
-            cutoff = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
-            rows = conn.execute(
-                """
-                SELECT json_extract(r.factors, '$.sector_momentum') as sector_score,
-                       r.style,
-                       COUNT(*) as count,
-                       SUM(CASE WHEN o.correct_t1 = 1 THEN 1 ELSE 0 END) as wins_t1,
-                       AVG(o.actual_change_t1) as avg_return_t1
-                FROM recommendations r
-                JOIN recommendation_outcomes o ON r.id = o.rec_id
-                WHERE r.created_at >= ?
-                  AND o.actual_change_t1 IS NOT NULL
-                GROUP BY r.style
-                HAVING count >= 3
-                """,
-                (cutoff,),
-            ).fetchall()
-
-            return {dict(r)["style"]: dict(r) for r in rows}
-        except Exception as exc:
-            logger.warning("Failed to get sector win rates: %s", exc)
-            return {}
-        finally:
-            conn.close()
-
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
