@@ -16,6 +16,12 @@ A map of the project documentation. Start with the development guide.
 - [QA Test Cases](testing/qa-test-cases.md) — API/endpoint QA matrix.
 - [E2E](testing/e2e.md) — end-to-end test execution guide.
 
+## Results
+
+- [v2 Backtest Results](backtest-v2-results.md) — honest out-of-sample evaluation of the
+  v2 signal/sizing stack (2019–2024, 14 A-shares). Reproduces with
+  [`scripts/backtest_v2_universe.py`](../scripts/backtest_v2_universe.py).
+
 ## Components
 
 - [Research Workstation](research-workstation-README.md) — the multi-model research
