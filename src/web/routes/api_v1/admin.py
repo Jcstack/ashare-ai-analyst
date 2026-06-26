@@ -203,9 +203,9 @@ async def get_data_sources(
     Provides a unified view of all data source backends with their
     current health, latency, and availability status.
     """
-    from src.data.source_router import DataSourceRouter
+    from src.data.source_router import get_source_router
 
-    router_instance = DataSourceRouter()
+    router_instance = get_source_router()
     router_status = router_instance.get_status()
     tracker_health = tracker.get_all_health()
 

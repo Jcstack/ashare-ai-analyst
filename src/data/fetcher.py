@@ -51,6 +51,7 @@ from src.data._column_maps import (
     SSE_INDEX_PREFIXES,
     SZSE_INDEX_PREFIXES,
 )
+from src.data.source_router import SourceDomain, get_source_router
 from src.utils.config import get_data_dir, load_config
 from src.utils.logger import get_logger
 
@@ -123,6 +124,8 @@ class StockDataFetcher:
         """
         self.config: dict[str, Any] = load_config(config_path)
         self.logger = get_logger("data.fetcher")
+        # Shared health tracker (single source of truth across all data sources).
+        self._source_router = get_source_router(config_path)
 
         # Unpack frequently-used config sections
         self._daily_cfg: dict[str, Any] = self.config.get("data_collection", {}).get(
@@ -239,6 +242,22 @@ class StockDataFetcher:
             return False
         return True
 
+    def _record_source(self, domain: SourceDomain, ok: bool) -> None:
+        """Record a source success/failure into the shared health router.
+
+        Defensive: health bookkeeping must never break a data fetch, so any
+        error here is swallowed. Only called on a fresh success or a hard
+        failure — stale data is data lag, not a source failure, so it is not
+        recorded.
+        """
+        try:
+            if ok:
+                self._source_router.record_success(domain)
+            else:
+                self._source_router.record_failure(domain)
+        except Exception:
+            self.logger.debug("source health record skipped", exc_info=True)
+
     def fetch_daily_ohlcv(
         self,
         symbol: str,
@@ -309,10 +328,12 @@ class StockDataFetcher:
                 df = self._qmt.get_daily_ohlcv(symbol, start, end)
                 if df is not None and not df.empty:
                     if self._check_data_freshness(df, symbol, "QMT"):
+                        self._record_source(SourceDomain.QMT, True)
                         self._save_cache(df, cache_path)
                         return df
                     _track_stale(df)
             except Exception as exc:
+                self._record_source(SourceDomain.QMT, False)
                 self.logger.warning(
                     "QMT daily OHLCV failed for %s: %s, trying EastMoney",
                     symbol,
@@ -336,10 +357,12 @@ class StockDataFetcher:
             )
             df = df.rename(columns=OHLCV_COLUMN_MAP)
             if self._check_data_freshness(df, symbol, "EastMoney"):
+                self._record_source(SourceDomain.EASTMONEY_PUSH2, True)
                 self._save_cache(df, cache_path)
                 return df
             _track_stale(df)
         except DataCollectionError:
+            self._record_source(SourceDomain.EASTMONEY_PUSH2, False)
             self.logger.warning(
                 "EastMoney source failed for %s, trying Tencent fallback",
                 symbol,
@@ -363,10 +386,12 @@ class StockDataFetcher:
                 df = df.rename(columns={"amount": "volume"})
 
             if self._check_data_freshness(df, symbol, "Tencent"):
+                self._record_source(SourceDomain.TENCENT, True)
                 self._save_cache(df, cache_path)
                 return df
             _track_stale(df)
         except DataCollectionError:
+            self._record_source(SourceDomain.TENCENT, False)
             self.logger.warning(
                 "Tencent source failed for %s, trying adata fallback",
                 symbol,
@@ -376,9 +401,11 @@ class StockDataFetcher:
         try:
             df = self._fetch_daily_via_adata(symbol, start, end, adjust, cache_path)
             if self._check_data_freshness(df, symbol, "adata"):
+                self._record_source(SourceDomain.ADATA, True)
                 return df  # _fetch_daily_via_adata already saves cache
             _track_stale(df)
         except DataCollectionError:
+            self._record_source(SourceDomain.ADATA, False)
             self.logger.warning("adata source also failed for %s", symbol)
 
         # All sources returned stale data — use the freshest one but warn
