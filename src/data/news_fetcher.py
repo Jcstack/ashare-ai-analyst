@@ -17,7 +17,11 @@ from src.data._column_maps import (
     HOT_RANK_COLUMN_MAP,
     NEWS_COLUMN_MAP,
 )
-from src.data.source_router import DataSourceRouter, SourceDomain
+from src.data.source_router import (
+    DataSourceRouter,
+    SourceDomain,
+    get_source_router,
+)
 from src.utils.config import load_config
 from src.utils.logger import get_logger
 
@@ -74,7 +78,7 @@ class NewsFetcher:
         self._max_items: int = news_cfg.get("max_items_per_stock", 20)
         self._hot_rank_limit: int = news_cfg.get("hot_rank_limit", 50)
         self._cache_ttl: float = float(news_cfg.get("cache_ttl_seconds", 300))
-        self._source_router = source_router or DataSourceRouter()
+        self._source_router = source_router or get_source_router()
         self._cache: dict[str, tuple[float, Any]] = {}
         self._last_request_ts: float = 0.0
 

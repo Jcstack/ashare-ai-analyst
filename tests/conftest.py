@@ -10,6 +10,25 @@ from unittest.mock import MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
+# Shared-singleton isolation
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_source_router():
+    """Reset the process-wide DataSourceRouter before/after each test.
+
+    Source health is in-memory and shared; resetting keeps tests that exercise
+    the fetcher cascade from leaking health state into one another.
+    """
+    from src.data.source_router import reset_source_router
+
+    reset_source_router()
+    yield
+    reset_source_router()
+
+
+# ---------------------------------------------------------------------------
 # Database isolation — prevent ALL tests from touching production databases
 # ---------------------------------------------------------------------------
 

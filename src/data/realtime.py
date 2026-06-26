@@ -14,7 +14,11 @@ from typing import Any
 import pandas as pd
 import requests as _requests
 
-from src.data.source_router import DataSourceRouter, SourceDomain
+from src.data.source_router import (
+    DataSourceRouter,
+    SourceDomain,
+    get_source_router,
+)
 from src.utils.config import load_config
 from src.utils.logger import get_logger
 
@@ -80,7 +84,7 @@ class RealtimeQuoteManager:
         self._cache_ttl: float = float(rt_cfg.get("cache_ttl_seconds", 5))
         self._batch_size: int = rt_cfg.get("batch_size", 50)
         self._rate_limit: float = 1.0 / rt_cfg.get("rate_limit_per_second", 2)
-        self._source_router = source_router or DataSourceRouter(config_name)
+        self._source_router = source_router or get_source_router(config_name)
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._last_request_ts: float = 0.0
         self._xueqiu_session: _requests.Session | None = None

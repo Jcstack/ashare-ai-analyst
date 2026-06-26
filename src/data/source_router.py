@@ -161,3 +161,33 @@ class DataSourceRouter:
             True if the source is not marked DOWN.
         """
         return self._sources[domain].health != SourceHealth.DOWN
+
+
+# ---------------------------------------------------------------------------
+# Process-wide shared instance — the single source of source-health truth
+# ---------------------------------------------------------------------------
+
+_DEFAULT_ROUTER: DataSourceRouter | None = None
+
+
+def get_source_router(config_name: str = "stocks") -> DataSourceRouter:
+    """Return the process-wide shared :class:`DataSourceRouter`.
+
+    The daily OHLCV fetcher, realtime quotes, and news all record into and read
+    from this one instance, so source health lives in a single place (and the
+    ``/admin`` health view reflects the whole system rather than an empty
+    per-request router). The first caller's ``config_name`` wins.
+    """
+    global _DEFAULT_ROUTER
+    if _DEFAULT_ROUTER is None:
+        _DEFAULT_ROUTER = DataSourceRouter(config_name)
+    return _DEFAULT_ROUTER
+
+
+def reset_source_router() -> None:
+    """Drop the shared router so the next ``get_source_router`` rebuilds it.
+
+    Used by tests for isolation (health state is in-memory and mutable).
+    """
+    global _DEFAULT_ROUTER
+    _DEFAULT_ROUTER = None
