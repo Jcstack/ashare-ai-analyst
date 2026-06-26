@@ -12,6 +12,12 @@ from typing import Any
 
 import pandas as pd
 
+from src.utils.ashare_constants import (
+    COMMISSION_RATE,
+    LOT_SIZE,
+    PRICE_LIMITS,
+    STAMP_DUTY_RATE,
+)
 from src.utils.config import load_config
 from src.utils.logger import get_logger
 
@@ -27,12 +33,9 @@ BOARD_MAIN: str = "main"
 BOARD_CHINEXT: str = "chinext"
 BOARD_STAR: str = "star"
 
-# Price limit percentages by board type
-PRICE_LIMITS: dict[str, float] = {
-    BOARD_MAIN: 0.10,
-    BOARD_CHINEXT: 0.20,
-    BOARD_STAR: 0.20,
-}
+# Price limits by board live in the canonical constants module and are imported
+# above (re-exported here for back-compat; backtest/engine imports PRICE_LIMITS
+# from this module).
 
 
 class BaseStrategy(ABC):
@@ -50,10 +53,14 @@ class BaseStrategy(ABC):
     def __init__(self, config_path: str = "strategy") -> None:
         self.config: dict[str, Any] = load_config(config_path)
         self.common_config: dict[str, Any] = self.config.get("common", {})
-        self.min_lot_size: int = self.common_config.get("min_lot_size", 100)
-        self.commission_rate: float = self.common_config.get("commission_rate", 0.0003)
+        self.min_lot_size: int = self.common_config.get("min_lot_size", LOT_SIZE)
+        self.commission_rate: float = self.common_config.get(
+            "commission_rate", COMMISSION_RATE
+        )
         self.min_commission: float = self.common_config.get("min_commission", 5.0)
-        self.stamp_tax_rate: float = self.common_config.get("stamp_tax_rate", 0.001)
+        self.stamp_tax_rate: float = self.common_config.get(
+            "stamp_tax_rate", STAMP_DUTY_RATE
+        )
         self.stop_loss: float = self.common_config.get("stop_loss", 0.08)
         self.take_profit: float = self.common_config.get("take_profit", 0.15)
         self.position_size: float = self.common_config.get("position_size", 0.3)

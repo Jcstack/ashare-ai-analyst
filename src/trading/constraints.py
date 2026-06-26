@@ -15,13 +15,18 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
+from src.utils.ashare_constants import (
+    CHINEXT_PREFIXES,
+    COMMISSION_RATE,
+    LOT_SIZE,
+    STAMP_DUTY_RATE,
+    STAR_PREFIXES,
+)
 from src.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
-# A-share exchange prefixes
-CHINEXT_PREFIXES = ("300", "301")  # 创业板
-STAR_PREFIXES = ("688", "689")  # 科创板
+# A-share exchange prefixes (CHINEXT/STAR from the canonical constants module)
 BSE_PREFIXES = ("8",)  # 北交所
 MAIN_BOARD_SH = ("600", "601", "603", "605")  # 沪市主板
 MAIN_BOARD_SZ = ("000", "001", "002", "003")  # 深市主板
@@ -71,9 +76,9 @@ class TradingConstraintsEngine:
         )
         self._max_chase_pct = self._config.get("max_intraday_chase_pct", 5.0)
         self._min_daily_turnover_wan = self._config.get("min_daily_turnover_wan", 5000)
-        self._lot_size = self._config.get("lot_size", 100)
-        self._commission_rate = self._config.get("commission_rate", 0.0003)
-        self._stamp_duty_rate = self._config.get("stamp_duty_rate", 0.001)
+        self._lot_size = self._config.get("lot_size", LOT_SIZE)
+        self._commission_rate = self._config.get("commission_rate", COMMISSION_RATE)
+        self._stamp_duty_rate = self._config.get("stamp_duty_rate", STAMP_DUTY_RATE)
         self._min_commission = self._config.get("min_commission", 5.0)
         logger.info("TradingConstraintsEngine initialized")
 

@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from src.utils.ashare_constants import LOT_SIZE, MAX_SINGLE_POSITION
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,8 +41,8 @@ class SizingResult:
 class PositionSizingConfig:
     """Configuration for position sizing."""
 
-    max_single_weight: float = 0.30
-    min_lot_size: int = 100
+    max_single_weight: float = MAX_SINGLE_POSITION
+    min_lot_size: int = LOT_SIZE
     kelly_fraction: float = 0.25
     target_volatility: float = 0.15
     max_leverage: float = 1.0
