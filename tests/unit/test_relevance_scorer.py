@@ -82,6 +82,13 @@ class TestImpactChain:
         assert any("影响链" in r for r in score.match_reasons)
 
     def test_usd_affects_gold(self, scorer):
+        """USD strength → gold transmission, preserved across the engine merge.
+
+        The USD templates now live in the canonical YAML (config/
+        impact_chain_templates.yaml: usd_strengthen / usd_weaken), and stocks
+        resolve through the shared sector→stock map (黄金 → 002155), so a bare
+        USD-strength headline still boosts a gold stock via the impact chain.
+        """
         item = {
             "item_id": "i7",
             "title": "美元指数突破105",
@@ -89,8 +96,8 @@ class TestImpactChain:
             "related_symbols": [],
         }
         score = scorer.score(item, "002155", "湖南黄金")
-        # USD strengthening should trigger impact chain to gold
         assert score.relevance > 0
+        assert any("影响链" in r for r in score.match_reasons)
 
     def test_oil_affects_petrochemical(self, scorer):
         item = {
