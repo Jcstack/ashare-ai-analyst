@@ -80,6 +80,26 @@ class OutcomeTracker:
         self._db_path = Path(db_path) if db_path else _DEFAULT_DB_PATH
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._calendar: Any = None
+
+    def _add_trading_days(self, start: datetime, n: int):
+        """Return the date ``n`` *trading* days after ``start``.
+
+        T+1/T+3/T+5 are trading-session horizons, not calendar days — a T+1
+        lookup after a Friday signal must land on the next session (Monday),
+        not Saturday. Falls back to calendar days if the calendar is unavailable.
+        """
+        try:
+            if self._calendar is None:
+                from src.data.trading_calendar import TradingCalendar
+
+                self._calendar = TradingCalendar()
+            d = start.date()
+            for _ in range(n):
+                d = self._calendar.next_trading_day(d)
+            return d
+        except Exception:
+            return (start + timedelta(days=n)).date()
 
     def _init_db(self) -> None:
         with self._conn() as conn:
@@ -304,15 +324,19 @@ class OutcomeTracker:
                 continue
 
             created_at = datetime.fromisoformat(created_at_str)
-            age_days = (now - created_at).days
+            today = now.date()
+
+            # Trading-day horizons (T+N = N trading sessions, not calendar days)
+            t1_date = self._add_trading_days(created_at, 1)
+            t3_date = self._add_trading_days(created_at, 3)
+            t5_date = self._add_trading_days(created_at, 5)
 
             updates: dict[str, Any] = {}
             new_status = status
 
             # T+1 evaluation
-            if t1_price is None and age_days >= 1:
+            if t1_price is None and t1_date <= today:
                 try:
-                    t1_date = created_at + timedelta(days=1)
                     price = await price_fetcher(symbol, t1_date.strftime("%Y-%m-%d"))
                     if price:
                         t1_return = (price - entry_price) / entry_price
@@ -323,9 +347,8 @@ class OutcomeTracker:
                     pass
 
             # T+3 evaluation
-            if t3_price is None and age_days >= 3:
+            if t3_price is None and t3_date <= today:
                 try:
-                    t3_date = created_at + timedelta(days=3)
                     price = await price_fetcher(symbol, t3_date.strftime("%Y-%m-%d"))
                     if price:
                         t3_return = (price - entry_price) / entry_price
@@ -336,9 +359,8 @@ class OutcomeTracker:
                     pass
 
             # T+5 evaluation (final)
-            if t5_price is None and age_days >= 5:
+            if t5_price is None and t5_date <= today:
                 try:
-                    t5_date = created_at + timedelta(days=5)
                     price = await price_fetcher(symbol, t5_date.strftime("%Y-%m-%d"))
                     if price:
                         t5_return = (price - entry_price) / entry_price
@@ -545,10 +567,24 @@ class OutcomeTracker:
     def get_calibration_data(
         self, lookback_days: int = 90, min_samples: int = 10
     ) -> dict[str, tuple[float, float]]:
-        """Get empirical likelihood ratios for Bayesian calibration.
+        """Get empirical likelihoods for Bayesian calibration.
 
-        Returns dict mapping "{source}/{confidence_bucket}" to
-        (P(signal|bull), P(signal|bear)) tuples.
+        Returns dict mapping ``"{source}/{confidence_bucket}"`` to
+        ``(P(bullish reading | true bull), P(bullish reading | true bear))``.
+
+        These are genuine **likelihoods** P(evidence | state), estimated as
+        conditional frequencies — NOT the source's hit-rate. The realized state
+        is reconstructed per signal from its predicted direction and whether the
+        prediction was correct:
+
+            realized bull = (predicted up AND correct) OR (predicted down AND wrong)
+
+        so ``P(bullish reading | bull) = #(predicted up & realized bull) / #(realized bull)``
+        and likewise for bear. They are Laplace-smoothed and do **not** sum to 1
+        (the previous ``p_bear = 1 - p_bull`` was a posterior-style identity that
+        does not hold for likelihoods). The log-likelihood-ratio the engine uses
+        is ``log(p_bull / p_bear)``, positive only when a source reads bullish
+        more often in true bull states than in true bear states.
 
         Only returns buckets with >= min_samples completed outcomes.
         """
@@ -564,23 +600,38 @@ class OutcomeTracker:
                             ELSE 'weak'
                           END as bucket,
                           COUNT(*) as total,
-                          SUM(CASE WHEN direction_correct = 1 THEN 1 ELSE 0 END) as correct
+                          -- realized bull = up-call correct OR down-call wrong
+                          SUM(CASE WHEN (direction IN ('buy', 'add')
+                                         AND direction_correct = 1)
+                                     OR (direction IN ('sell', 'reduce')
+                                         AND direction_correct = 0)
+                                   THEN 1 ELSE 0 END) as n_bull,
+                          -- bullish reading that landed in a true bull state
+                          SUM(CASE WHEN direction IN ('buy', 'add')
+                                    AND direction_correct = 1
+                                   THEN 1 ELSE 0 END) as bull_in_bull,
+                          -- bullish reading that landed in a true bear state
+                          SUM(CASE WHEN direction IN ('buy', 'add')
+                                    AND direction_correct = 0
+                                   THEN 1 ELSE 0 END) as bull_in_bear
                    FROM tracked_signals
                    WHERE status = 'complete'
+                   AND direction_correct IS NOT NULL
                    AND created_at > ?
                    GROUP BY source, bucket
                    HAVING total >= ?""",
                 (cutoff, min_samples),
             ).fetchall()
 
-        for source, bucket, total, correct in rows:
-            key = f"{source}/{bucket}"
-            p_given_bull = correct / total if total > 0 else 0.5
-            p_given_bear = 1.0 - p_given_bull
-            # Avoid extreme values
-            p_given_bull = max(0.1, min(0.9, p_given_bull))
-            p_given_bear = max(0.1, min(0.9, p_given_bear))
-            calibration[key] = (p_given_bull, p_given_bear)
+        for source, bucket, total, n_bull, bull_in_bull, bull_in_bear in rows:
+            n_bear = total - n_bull
+            # Laplace-smoothed conditional frequencies → proper likelihoods.
+            p_given_bull = (bull_in_bull + 1) / (n_bull + 2)
+            p_given_bear = (bull_in_bear + 1) / (n_bear + 2)
+            # Clamp to keep the LLR finite/stable.
+            p_given_bull = max(0.05, min(0.95, p_given_bull))
+            p_given_bear = max(0.05, min(0.95, p_given_bear))
+            calibration[f"{source}/{bucket}"] = (p_given_bull, p_given_bear)
 
         logger.info(
             "Calibration data: %d buckets with >= %d samples",
