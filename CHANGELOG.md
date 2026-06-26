@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.1] — Post-v2.0.0 hardening: honest backtest + audit-driven fixes
+
+A multi-agent code audit of the v2 stack drove a round of correctness fixes,
+honest validation, and de-duplication. Highlight: the **first out-of-sample
+backtest** of the v2 signal/sizing stack — published with the candid result that
+it shows **no demonstrated alpha** vs buy-and-hold (a drawdown-limiter that caps
+trend upside). Still **simulation-only** — not investment advice.
+
+### Added
+
+- **Out-of-sample backtest of the v2 stack** (`docs/backtest-v2-results.md`,
+  `scripts/backtest_v2.py`, `scripts/backtest_v2_universe.py`): bridges the v2
+  signal/sizing stack into the A-share backtest engine (no look-ahead) and
+  reports an honest equity curve, Sharpe, drawdown, and a buy-and-hold baseline
+  over 2019–2024 (14 names). Result: +25.5% vs +351.7% buy-and-hold, 0/14. (#43, #59)
+- **One-command offline demo** — `make demo` runs the v2 backtest on a bundled
+  sample dataset with no Docker, API keys, or network. (#65)
+- **`docs/how-it-works.md`** — newcomer overview tying the OODA loop and Bayesian
+  calibration to the backtest finding; `ROADMAP.md` — tiered, evidence-grounded
+  roadmap from the audit. (#41, #63)
+
+### Fixed
+
+- **Risk gates were no-ops** — `preflight` now actually reads the persisted
+  circuit-breaker halt state (via `is_halted()`) and enforces T+1 sellability;
+  `review_agent` buy/watch score cutoffs are named, documented constants. (#42)
+- **Bayesian likelihood derivation** — `OutcomeTracker` now estimates genuine
+  `P(evidence | state)` from conditional frequencies instead of mislabeling the
+  hit-rate (and dropping the unjustified `p_bear = 1 − p_bull`). (#61)
+- **T+N outcome horizons** use trading days (via `TradingCalendar`), not calendar
+  days, so a T+1 lookup after a Friday no longer lands on a weekend; adds the
+  first dedicated `OutcomeTracker` tests. (#61)
+
+### Changed
+
+- **Single source of truth for A-share constants** (`src/utils/ashare_constants.py`)
+  — lot size, commission/stamp rates, and board price limits are imported instead
+  of re-hardcoded across trading/strategy/backtest/risk. (#64)
+- **Unified data-source health** on one shared `DataSourceRouter` — the daily
+  fetcher, realtime, and news now record into and read from one health view
+  (the `/admin` dashboard was previously empty). (#66)
+- **Merged the two causal-chain engines** — `ImpactChainEngine` is now a thin
+  adapter over the canonical `CausalChainConstructor`; stock resolution preserved
+  via a shared sector→stock map; USD→gold transmission kept lossless. (#67)
+- **LLM-debate dependency de-risked** — an opt-in (`allow_degraded_buys`, default
+  off) lets the deterministic stack issue a damped buy when the debate engine is
+  unavailable, instead of silently dropping the signal. (#61)
+- **Honest naming** — "Qlib Alpha158" → custom alpha factors; "causal chains" →
+  rule-based templates; `IC` annotated as a return-autocorrelation proxy. (#62)
+
+### Removed
+
+- Dead code (`alternative_bars`, `get_sector_win_rates`, `to_context_str`,
+  deprecated prompt constants) and a no-op `_sector_calibration` dimension. (#60)
+
 ## [2.0.0] — AI-first autonomous agent architecture
 
 Major architecture upgrade: the platform moves from a linear
