@@ -1,4 +1,6 @@
-.PHONY: up down restart rebuild logs status clean purge test-integration-real health qlib-update qlib-status bridge-start bridge-stop bridge-status help
+.PHONY: up down restart rebuild logs status clean purge test-integration-real health qlib-update qlib-status bridge-start bridge-stop bridge-status demo help
+
+PYTHON ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python3)
 
 # ============================================================
 # Docker Compose 管理脚本
@@ -198,12 +200,27 @@ bridge-status:
 	@curl -s http://localhost:19821/health 2>/dev/null | python3 -m json.tool \
 		|| echo "Bridge not running"
 
+# ============================================================
+# 离线演示 / Offline demo (no Docker, no API keys, no network)
+# ============================================================
+
+demo:
+	@echo "▶ v2 回测离线演示（无需 Docker / API Key / 网络）"
+	@echo "  v2 backtest on bundled sample data — no Docker, API keys, or network."
+	@echo ""
+	@$(PYTHON) -m scripts.backtest_v2 --csv scripts/sample/demo_ohlcv.csv --no-regime
+	@echo ""
+	@echo "下一步 / Next: 用真实数据跑 universe 回测："
+	@echo "  $(PYTHON) -m scripts.backtest_v2_universe --start 20190101 --end 20241231"
+	@echo "完整启动 / Full stack:  make up   ·   文档/docs: docs/how-it-works.md"
+
 # 帮助信息
 help:
 	@echo ""
 	@echo "Docker Compose 管理命令"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo ""
+	@echo "  make demo      一键离线演示 (无需 Docker/API Key/网络)"
 	@echo "  make up        构建并启动所有服务 (默认)"
 	@echo "  make down      停止所有服务 (优雅等待 30s)"
 	@echo "  make restart   重启 (保留镜像)"

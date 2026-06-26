@@ -99,6 +99,16 @@ src/web/ FastAPI  ·  frontend/ React SPA  ·  src/discord_bot/  ·  openclaw/ C
 
 ## 快速开始 · Quick Start
 
+### 0. 30 秒离线演示 / Try it in 30s (no Docker, no API keys, no network)
+
+```bash
+pip install -r requirements.txt
+make demo      # 用样例数据跑 v2 回测 / runs the v2 backtest on bundled sample data
+```
+
+See [`docs/how-it-works.md`](docs/how-it-works.md) for what it does. For the full
+stack (web UI, agent loop, automation), continue below.
+
 ### 前置条件 / Prerequisites
 
 - Docker & Docker Compose
