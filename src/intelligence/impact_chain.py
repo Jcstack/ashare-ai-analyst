@@ -360,19 +360,79 @@ EVENT_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-class ImpactChainEngine:
-    """Constructs impact chains from macro events to affected assets.
+def _build_sector_stock_map(
+    templates: dict[str, dict[str, Any]],
+) -> dict[str, list[str]]:
+    """Invert the curated CHAIN_TEMPLATES into a ``sector -> [stocks]`` map.
 
-    Phase 1: Template-based chain construction (rule engine).
-    Phase 2 (future): LLM-enhanced chain building with historical analogy search.
+    Engine B (``CausalChainConstructor``) resolves only *sectors* —
+    ``ImpactChainLink.affected_stocks`` is always empty. To preserve Engine A's
+    ``find_stock_impact`` contract we re-use the hand-authored stock bindings
+    that live in ``CHAIN_TEMPLATES``: each path binds ``affected_sectors`` to
+    ``affected_stocks``, so inverting gives a sector → stock lookup we can use to
+    re-populate the bridged chain's stocks.
+    """
+    sector_stocks: dict[str, list[str]] = {}
+    for template in templates.values():
+        for path in template.get("paths", []):
+            stocks = path.get("affected_stocks", [])
+            if not stocks:
+                continue
+            for sector in path.get("affected_sectors", []):
+                bucket = sector_stocks.setdefault(sector, [])
+                for stock in stocks:
+                    if stock not in bucket:
+                        bucket.append(stock)
+    return sector_stocks
+
+
+# Map a chain link's order to a human-readable transmission lag.
+_LAG_BY_ORDER: dict[int, str] = {0: "immediate", 1: "1-3d", 2: "1-2w"}
+
+
+def _magnitude_from_confidence(confidence: float) -> str:
+    """Bucket a link confidence into Engine A's magnitude vocabulary."""
+    if confidence >= 0.7:
+        return "strong"
+    if confidence >= 0.4:
+        return "moderate"
+    return "weak"
+
+
+class ImpactChainEngine:
+    """Adapter exposing Engine A's API on top of Engine B.
+
+    This class used to own its own ``CHAIN_TEMPLATES`` rule base. It is now a
+    thin adapter over :class:`~src.intelligence.causal_chain.CausalChainConstructor`
+    (Engine B), which loads the canonical YAML templates
+    (``config/impact_chain_templates.yaml``) and matches events via regex.
+
+    The public surface — ``detect_event_type``, ``build_chain``,
+    ``build_chains_for_event``, ``find_stock_impact`` and ``persist_chain`` —
+    and the ``ImpactChain`` / ``TransmissionPath`` dataclasses are preserved for
+    existing callers (relevance_scorer, rotation_engine, tool_registry, the web
+    API).
+
+    Engine B resolves sectors but leaves ``affected_stocks`` empty, so this
+    adapter re-binds stocks using a ``sector -> [stocks]`` map inverted from the
+    legacy ``CHAIN_TEMPLATES`` (kept in this module solely as that data source).
     """
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self._config = config or self._load_config()
-        self._templates = self._config.get("templates", CHAIN_TEMPLATES)
-        self._keywords = self._config.get("keywords", EVENT_KEYWORDS)
+        # CHAIN_TEMPLATES / EVENT_KEYWORDS are retained ONLY as the data source
+        # for the sector -> stock map used to defuse Engine B's empty
+        # affected_stocks. Chain construction itself is delegated to Engine B.
+        templates = self._config.get("templates", CHAIN_TEMPLATES)
+        self._sector_stocks = _build_sector_stock_map(templates)
+
+        from src.intelligence.causal_chain import CausalChainConstructor
+
+        self._constructor = CausalChainConstructor()
         logger.info(
-            "ImpactChainEngine initialized with %d templates", len(self._templates)
+            "ImpactChainEngine initialized (adapter over CausalChainConstructor); "
+            "%d sectors in stock map",
+            len(self._sector_stocks),
         )
 
     @staticmethod
@@ -382,25 +442,31 @@ class ImpactChainEngine:
         except FileNotFoundError:
             return {}
 
+    def _resolve_stocks(self, sectors: list[str]) -> list[str]:
+        """Resolve a list of sectors to stock codes via the inverted map."""
+        stocks: list[str] = []
+        for sector in sectors:
+            for stock in self._sector_stocks.get(sector, []):
+                if stock not in stocks:
+                    stocks.append(stock)
+        return stocks
+
     def detect_event_type(self, text: str) -> list[str]:
-        """Detect which event templates match the given text.
+        """Detect which Engine B template matches the given text.
+
+        Delegates to ``CausalChainConstructor``'s regex template matching.
 
         Args:
             text: News headline, alert summary, or event description.
 
         Returns:
-            List of matching template keys, ordered by match confidence.
+            ``[template_name]`` if a template matches, else ``[]``. Engine B
+            returns a single best match (first matching regex), so this is at
+            most one element — a semantic change from the old multi-template,
+            keyword-count-ranked behaviour.
         """
-        text_lower = text.lower()
-        matches: list[tuple[str, int]] = []
-
-        for template_key, keywords in self._keywords.items():
-            hit_count = sum(1 for kw in keywords if kw.lower() in text_lower)
-            if hit_count > 0:
-                matches.append((template_key, hit_count))
-
-        matches.sort(key=lambda x: x[1], reverse=True)
-        return [m[0] for m in matches]
+        match = self._constructor._match_template(text)
+        return [match[0]] if match else []
 
     def build_chain(
         self,
@@ -409,53 +475,56 @@ class ImpactChainEngine:
     ) -> ImpactChain | None:
         """Build an impact chain from an event description.
 
+        Delegates construction to Engine B and bridges the resulting
+        ``CausalChain`` into Engine A's ``ImpactChain`` shape, re-binding stocks
+        from the sector → stock map (Engine B leaves ``affected_stocks`` empty).
+
         Args:
             event_text: The event description/headline.
-            template_key: Specific template to use; auto-detected if None.
+            template_key: Accepted for backward compatibility but ignored —
+                Engine B selects the template from the event text itself.
 
         Returns:
-            ImpactChain or None if no matching template.
+            ImpactChain or None if Engine B finds no matching template.
         """
-        if template_key is None:
-            detected = self.detect_event_type(event_text)
-            if not detected:
-                logger.debug("No matching template for event: %s", event_text[:50])
-                return None
-            template_key = detected[0]
-
-        template = self._templates.get(template_key)
-        if template is None:
-            logger.warning("Template not found: %s", template_key)
+        causal = self._constructor.construct_chain({"title": event_text})
+        if causal is None:
+            logger.debug("No matching template for event: %s", event_text[:50])
             return None
 
-        paths = [
-            TransmissionPath(
-                cause=p["cause"],
-                effect=p["effect"],
-                direction=p["direction"],
-                magnitude=p["magnitude"],
-                affected_sectors=p.get("affected_sectors", []),
-                affected_stocks=p.get("affected_stocks", []),
-                lag=p.get("lag", "immediate"),
+        paths: list[TransmissionPath] = []
+        previous_impact = event_text
+        for link in causal.chain:
+            affected_stocks = link.affected_stocks or self._resolve_stocks(link.sectors)
+            paths.append(
+                TransmissionPath(
+                    cause=previous_impact,
+                    effect=link.impact,
+                    direction="positive" if link.direction == "bullish" else "negative",
+                    magnitude=_magnitude_from_confidence(link.confidence),
+                    affected_sectors=link.sectors,
+                    affected_stocks=affected_stocks,
+                    lag=_LAG_BY_ORDER.get(link.order, "1-3m"),
+                )
             )
-            for p in template["paths"]
-        ]
+            previous_impact = link.impact
 
         chain = ImpactChain(
             chain_id=str(uuid.uuid4()),
             trigger_event=event_text,
-            trigger_type=template.get("trigger_type", "unknown"),
+            trigger_type=causal.event_type,
             timestamp=datetime.now(UTC),
             transmission_paths=paths,
-            confidence=0.7,  # template-based = moderate confidence
+            confidence=causal.base_confidence,
             time_horizon="short_term",
             source="template",
         )
 
         logger.info(
-            "Built impact chain for '%s' using template '%s': %d paths, %d sectors",
+            "Built impact chain for '%s' via Engine B template '%s': "
+            "%d paths, %d sectors",
             event_text[:40],
-            template_key,
+            causal.event_type,
             len(paths),
             len(chain.all_affected_sectors),
         )
@@ -466,18 +535,15 @@ class ImpactChainEngine:
         return chain
 
     def build_chains_for_event(self, event_text: str) -> list[ImpactChain]:
-        """Build all matching impact chains for an event.
+        """Build matching impact chains for an event.
 
-        An event like "中东战争导致油价飙升" may match both
-        geopolitical_war and oil_surge templates.
+        Semantic shift: Engine A used to return one chain per matched keyword
+        template (a compound event like "中东战争导致油价飙升" could yield two
+        chains). Engine B returns a single best-match chain per event, so this
+        now returns ``[chain]`` (or ``[]`` if no template matches).
         """
-        detected = self.detect_event_type(event_text)
-        chains = []
-        for key in detected:
-            chain = self.build_chain(event_text, template_key=key)
-            if chain:
-                chains.append(chain)
-        return chains
+        chain = self.build_chain(event_text)
+        return [chain] if chain is not None else []
 
     def persist_chain(self, chain: ImpactChain) -> None:
         """Persist an impact chain to SQLite for historical analysis."""

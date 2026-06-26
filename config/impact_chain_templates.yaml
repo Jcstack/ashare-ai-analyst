@@ -234,3 +234,38 @@ templates:
         sectors: ["消费", "汽车"]
         direction: bullish
         confidence_decay: 0.6
+
+  usd_strengthen:
+    event_pattern: "美元.*走强|美元.*走高|美元.*升值|美元指数.*突破|美元指数.*上涨|USD.*strengthen|dollar.*surge"
+    trigger_type: monetary
+    chain:
+      - order: 1
+        impact: "黄金承压"
+        sectors: ["黄金", "贵金属"]
+        direction: bearish
+        confidence_decay: 0.9
+      - order: 2
+        impact: "人民币贬值压力"
+        sectors: ["航空", "造纸"]
+        direction: bearish
+        confidence_decay: 0.7
+      - order: 3
+        impact: "出口企业受益"
+        sectors: ["纺织服装", "家电", "电子"]
+        direction: bullish
+        confidence_decay: 0.6
+
+  usd_weaken:
+    event_pattern: "美元.*走弱|美元.*走低|美元.*贬值|美元指数.*下跌|美元指数.*回落|USD.*weaken|dollar.*fall"
+    trigger_type: monetary
+    chain:
+      - order: 1
+        impact: "黄金上涨"
+        sectors: ["黄金", "贵金属"]
+        direction: bullish
+        confidence_decay: 0.9
+      - order: 2
+        impact: "人民币升值"
+        sectors: ["航空", "造纸"]
+        direction: bullish
+        confidence_decay: 0.7
