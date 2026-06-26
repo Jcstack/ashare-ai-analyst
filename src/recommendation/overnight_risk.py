@@ -37,25 +37,6 @@ class OvernightRiskProfile:
     # Risk score (0=safe, 1=dangerous)
     risk_score: float
 
-    def to_context_str(self) -> str:
-        """Format as context string for LLM prompt injection."""
-        parts = [
-            f"隔夜风险分析 ({self.symbol}):",
-            f"  平均隔夜跳空: {self.avg_gap_pct:+.2f}% (标准差: {self.std_gap_pct:.2f}%)",
-            f"  最大负跳空: {self.max_negative_gap_pct:.2f}%",
-            f"  隔夜跳空为负概率: {self.gap_down_ratio:.0%}",
-        ]
-        if self.rally_sample_size > 0:
-            parts.extend(
-                [
-                    f"  大涨后次日回调概率: {self.post_rally_drawdown_prob:.0%} "
-                    f"(样本={self.rally_sample_size}天)",
-                    f"  大涨后次日平均收益: {self.post_rally_avg_return:+.2f}%",
-                ]
-            )
-        parts.append(f"  综合隔夜风险评分: {self.risk_score:.2f}/1.00")
-        return "\n".join(parts)
-
 
 class OvernightRiskCalculator:
     """Calculate overnight risk metrics from historical OHLCV data."""

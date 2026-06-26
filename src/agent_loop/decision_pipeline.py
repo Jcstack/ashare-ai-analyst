@@ -81,6 +81,12 @@ class DecisionPipeline:
         self._consecutive_loss_threshold = cfg.get("consecutive_loss_threshold", 3)
         self._consecutive_loss_factor = cfg.get("consecutive_loss_size_factor", 0.5)
         self._overnight_risk_budget = cfg.get("overnight_risk_budget_pct", 0.05)
+        # De-risk the LLM-debate dependency: by default a buy is refused when the
+        # debate engine is unavailable. When enabled, the deterministic stack may
+        # issue a damped buy off the Bayesian prescreen so a missing/failed oracle
+        # degrades gracefully instead of silently dropping the signal (#56).
+        self._allow_degraded_buys = cfg.get("allow_degraded_buys", False)
+        self._degraded_buy_min_prob = cfg.get("degraded_buy_min_prob", 0.60)
 
         # Circuit breaker state (Fix 2)
         self._portfolio_drawdown_halt_pct = cfg.get("portfolio_drawdown_halt_pct", 0.05)
@@ -95,6 +101,30 @@ class DecisionPipeline:
         self._stoploss_pause_until: float = 0.0  # epoch timestamp
 
         logger.info("DecisionPipeline initialized")
+
+    def _degraded_buy_record(
+        self, signal: AggregatedSignal, prescreen_p: float
+    ) -> dict[str, Any] | None:
+        """Synthesize a conservative buy when the LLM debate is unavailable.
+
+        Returns ``None`` (refuse the buy — the safe default) unless
+        ``allow_degraded_buys`` is set and the Bayesian prescreen clears
+        ``degraded_buy_min_prob``. Scores are damped — there is no debate
+        corroboration — so a degraded buy is weaker than a debated one.
+        """
+        if not self._allow_degraded_buys or prescreen_p < self._degraded_buy_min_prob:
+            return None
+        return {
+            "bull_score": round(prescreen_p * 0.8, 4),
+            "bear_score": round((1.0 - prescreen_p) * 0.8, 4),
+            "reasoning": (
+                f"Degraded buy (no debate): Bayesian prescreen P(bull)={prescreen_p:.2f}"
+            ),
+            "risk_veto": False,
+            "final_action": signal.direction.value.lower(),
+            "verdict": {"degraded": True},
+            "degraded": True,
+        }
 
     def _bayesian_prescreen(
         self,
@@ -402,55 +432,68 @@ class DecisionPipeline:
                 return None
 
         # --- UST: Bayesian prescreen (cheap, before expensive debate) ---
-        if signal.direction.value.lower() in ("buy", "add"):
-            preliminary_p = self._bayesian_prescreen(
+        is_buy = signal.direction.value.lower() in ("buy", "add")
+        prescreen_p = 1.0
+        if is_buy:
+            prescreen_p = self._bayesian_prescreen(
                 signal, thesis, mkt, portfolio, available_cash
             )
-            if preliminary_p < self._prescreen_threshold:
+            if prescreen_p < self._prescreen_threshold:
                 logger.info(
                     "Bayesian prescreen: P(bull)=%.2f < %.2f — skip debate %s",
-                    preliminary_p,
+                    prescreen_p,
                     self._prescreen_threshold,
                     signal.symbol,
                 )
                 return None
 
         # --- UST: LLM budget check (before expensive debate) ---
-        if self._budget_tracker and not self._budget_tracker.can_call("gemini_web"):
-            if signal.direction.value.lower() in ("buy", "add"):
-                logger.info(
-                    "LLM budget exhausted — skip debate for buy %s", signal.symbol
-                )
-                return None
-            # Sell/reduce: pass through without debate
+        budget_exhausted = bool(
+            self._budget_tracker and not self._budget_tracker.can_call("gemini_web")
+        )
+        if budget_exhausted and not is_buy:
             logger.info(
                 "LLM budget exhausted — sell/reduce %s passes through", signal.symbol
             )
 
-        # Run debate — no fallback for buys if debate engine unavailable
-        debate_record = self._run_debate(signal, mkt, thesis)
+        # Run the debate unless the budget is exhausted for a buy.
+        debate_record = (
+            None
+            if (budget_exhausted and is_buy)
+            else self._run_debate(signal, mkt, thesis)
+        )
         if debate_record is None:
-            # Debate unavailable: buys are blocked, sells pass through
-            if signal.direction.value.lower() in ("buy", "add"):
-                logger.warning(
-                    "Debate engine unavailable — refusing buy for %s "
-                    "(no degraded recommendation without debate)",
+            if is_buy:
+                # Debate unavailable (no engine, or budget exhausted). Default is
+                # to refuse; allow_degraded_buys lets the deterministic stack
+                # issue a damped buy off the prescreen instead (#56).
+                debate_record = self._degraded_buy_record(signal, prescreen_p)
+                if debate_record is None:
+                    logger.warning(
+                        "Debate unavailable — refusing buy for %s "
+                        "(set allow_degraded_buys for graceful degradation)",
+                        signal.symbol,
+                    )
+                    return None
+                logger.info(
+                    "Debate unavailable — degraded buy for %s (prescreen P=%.2f)",
+                    signal.symbol,
+                    prescreen_p,
+                )
+            else:
+                # Sell/reduce: allow passthrough without debate
+                logger.info(
+                    "Debate engine unavailable — sell/reduce for %s passes through",
                     signal.symbol,
                 )
-                return None
-            # Sell/reduce: allow passthrough without debate
-            logger.info(
-                "Debate engine unavailable — sell/reduce for %s passes through",
-                signal.symbol,
-            )
-            debate_record = {
-                "bull_score": 0.0,
-                "bear_score": signal.confidence,
-                "reasoning": signal.reason,
-                "risk_veto": False,
-                "final_action": signal.direction.value.lower(),
-                "verdict": {},
-            }
+                debate_record = {
+                    "bull_score": 0.0,
+                    "bear_score": signal.confidence,
+                    "reasoning": signal.reason,
+                    "risk_veto": False,
+                    "final_action": signal.direction.value.lower(),
+                    "verdict": {},
+                }
 
         # Record LLM call in budget tracker
         if self._budget_tracker and debate_record:

@@ -240,27 +240,28 @@ class SimulationBroker(BrokerInterface):
 
 
 class LiveBroker(BrokerInterface):
-    """Stub for real broker integration.
+    """Intentionally-unimplemented stub for real broker integration.
 
-    Requires:
-    - config/broker.yaml: mode=live
-    - Explicit user configuration
-    - All trades must pass through ConfirmationGate with VERIFIED status
-
-    NOT IMPLEMENTED — placeholder for future integration.
+    This is a **simulation-only** project — live order routing is not implemented
+    by design. Every method raises :class:`NotImplementedError`; use
+    :class:`SimulationBroker` (the default) instead. A real integration would
+    require ``config/broker.yaml: mode=live``, explicit user configuration, and
+    all trades passing through ``ConfirmationGate`` with VERIFIED status.
     """
 
+    _MSG = "LiveBroker is not implemented — this is a simulation-only project; use SimulationBroker."
+
     def __init__(self) -> None:
-        logger.warning("LiveBroker instantiated — NOT IMPLEMENTED")
+        logger.warning("LiveBroker instantiated — not implemented (simulation-only)")
 
     def get_positions(self) -> list[Position]:
-        raise NotImplementedError("LiveBroker not implemented")
+        raise NotImplementedError(self._MSG)
 
     def get_balance(self) -> Balance:
-        raise NotImplementedError("LiveBroker not implemented")
+        raise NotImplementedError(self._MSG)
 
     def get_order_status(self, order_id: str) -> OrderStatus:
-        raise NotImplementedError("LiveBroker not implemented")
+        raise NotImplementedError(self._MSG)
 
     def submit_order(
         self,
@@ -270,7 +271,7 @@ class LiveBroker(BrokerInterface):
         price: float,
         gate_request_id: str = "",
     ) -> OrderStatus:
-        raise NotImplementedError("LiveBroker not implemented")
+        raise NotImplementedError(self._MSG)
 
     @property
     def mode(self) -> str:

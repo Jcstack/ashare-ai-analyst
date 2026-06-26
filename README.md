@@ -216,6 +216,7 @@ npm run dev        # 开发模式 / Dev mode
 - [`docs/`](docs/README.md) — documentation index
 - [`docs/guides/development-guide.md`](docs/guides/development-guide.md) — architecture, tech stack, data flow (**start here**)
 - [`docs/guides/runbook.md`](docs/guides/runbook.md) — local setup & run
+- [`docs/backtest-v2-results.md`](docs/backtest-v2-results.md) — **honest out-of-sample backtest of the v2 stack** (spoiler: no demonstrated alpha vs buy-and-hold)
 - [`docs/testing/`](docs/testing/test-strategy.md) — test strategy & cases
 - [`docs/research-workstation-README.md`](docs/research-workstation-README.md) — research workstation usage
 
