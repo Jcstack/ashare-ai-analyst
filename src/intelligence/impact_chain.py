@@ -1,7 +1,9 @@
 """Impact Chain Engine — builds event-to-asset transmission chains.
 
-Per PRD v34.0 FR-GI002: Automatic construction of causal chains from
-macro events to affected sectors and stocks.
+Per PRD v34.0 FR-GI002: maps macro events to affected sectors and stocks using
+hand-authored, keyword-matched transmission **templates** (a curated rule base).
+These are domain-knowledge templates, NOT statistically inferred causality — the
+edge confidences are fixed constants, not estimated from data.
 
 Example chain:
   中东战争 → 原油↑ → 航运成本↑ → 航运股↓

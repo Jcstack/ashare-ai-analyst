@@ -160,7 +160,9 @@ def cmd_predict(symbols: list[str], horizon: int) -> dict[str, dict[str, Any]]:
                     # Use mean recent return as raw score, sigmoid to [0,1]
                     raw = float(returns.mean()) * 100  # scale up
                     score = round(1.0 / (1.0 + math.exp(-raw)), 4)
-                    # IC: autocorrelation of returns as proxy
+                    # NOTE: serial autocorrelation of returns, used as a rough
+                    # proxy only — this is NOT a true cross-sectional Information
+                    # Coefficient (rank-corr of factor vs forward returns).
                     if len(returns) >= 10:
                         ic = round(float(returns.autocorr()), 4)
 
@@ -278,6 +280,9 @@ def cmd_ic(symbol: str) -> dict[str, Any]:
         if data is None or data.empty or len(data) < 10:
             return {"symbol": symbol, "ic": None, "reason": "insufficient data"}
 
+        # Serial return autocorrelation used as a rough proxy — NOT a true
+        # cross-sectional Information Coefficient. The "ic" key is kept for
+        # config/back-compat; treat it as an autocorrelation signal.
         ic_val = float(data.iloc[:, 0].dropna().autocorr())
         threshold = _ACTUARY_CFG.get("ic_threshold", 0.03)
         return {

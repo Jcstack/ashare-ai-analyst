@@ -1,7 +1,9 @@
-"""Qlib Alpha factor computation — enhanced factor library for stock screening.
+"""Qlib alpha factor computation — custom factor library for stock screening.
 
-FR-QL001: Wraps Qlib-style Alpha158 factor categories into a computation
-engine that works via the QlibAdapter (remote/subprocess/in-process).
+FR-QL001: a hand-written set of ~20 alpha factors expressed in the Qlib DSL,
+computed via the QlibAdapter (remote/subprocess/in-process). This is *inspired
+by* Qlib's Alpha158 factor categories but is NOT Qlib's Alpha158 dataset handler
+— it does not instantiate or reproduce the full 158-factor set.
 
 Factor categories:
 - Momentum: 5d, 10d, 20d, 60d price momentum
